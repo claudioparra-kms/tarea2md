@@ -38,22 +38,133 @@ if (length(to_install) > 0) {
   )
 }
 ```
-## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+# Problema 1: Predicción de supervivencia en Titanic
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+# 1.1 Exploración y limpieza de datos
 
-```{r cars}
-summary(cars)
+## a) Carga y descripción del dataset
+
+Se carga el dataset `titanic_train` desde el paquete `titanic`.
+
+```{r carga}
+data("titanic_train", package = "titanic")
 ```
 
-## Including Plots
+### Dimensiones del dataset original
 
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r dimensiones}
+dim(titanic_train)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+El primer valor corresponde a la cantidad de pasajeros y el segundo a la
+cantidad de variables del dataset.
+
+### Tipos de variables
+
+```{r tipos}
+glimpse(titanic_train)
+```
+
+`glimpse()` permite observar el nombre y el tipo de cada variable. En los datos
+originales, algunas variables que representan categorías aparecen almacenadas
+como números o texto. Estas variables serán transformadas posteriormente en
+factores.
+
+## b) Selección de las variables solicitadas
+
+Para la limpieza se consideran las ocho variables indicadas en el enunciado:
+`Survived`, `Pclass`, `Sex`, `Age`, `SibSp`, `Parch`, `Fare` y `Embarked`.
+
+```{r seleccion}
+titanic_seleccion <- titanic_train %>%
+  select(
+    Survived,
+    Pclass,
+    Sex,
+    Age,
+    SibSp,
+    Parch,
+    Fare,
+    Embarked
+  ) %>%
+  mutate(
+    # En Embarked los datos ausentes aparecen como texto
+    # Se transforman a NA para poder tranajar con ellos mucho mejor
+    Embarked = ifelse(Embarked == "", NA, Embarked)
+  )
+
+glimpse(titanic_seleccion)
+```
+
+## Porcentaje de valores perdidos por columna
+
+Primero se cuenta la cantidad de valores `NA` de cada variable. Después se
+calcula el porcentaje respecto del total de pasajeros.
+```{r faltantes}
+faltantes <- titanic_seleccion %>%
+  summarise(
+    Survived = sum(is.na(Survived)),
+    Pclass = sum(is.na(Pclass)),
+    Sex = sum(is.na(Sex)),
+    Age = sum(is.na(Age)),
+    SibSp = sum(is.na(SibSp)),
+    Parch = sum(is.na(Parch)),
+    Fare = sum(is.na(Fare)),
+    Embarked = sum(is.na(Embarked))
+  ) %>%
+  pivot_longer(
+    cols = Survived:Embarked,
+    names_to = "Variable",
+    values_to = "Cantidad_NA"
+  ) %>%
+  mutate(
+    Porcentaje_NA =
+      Cantidad_NA / nrow(titanic_seleccion) * 100
+  )
+
+faltantes
+```
+
+# c) Tratamiento y justificación de los valores perdidos
+
+La variable `Age` contiene una cantidad importante de valores perdidos. Si se
+eliminaran todas esas filas, se perderían muchos pasajeros.
+
+En `Embarked` existen solamente dos registros sin información. Como son muy
+pocos casos en comparación con el total de pasajeros, se eliminan esas filas
+mediante `drop_na(Embarked)`.
+
+
+# Eliminación de los Embarked faltantes.
+
+titanic_df <- titanic_seleccion %>%
+  mutate(
+    Age = ifelse(is.na(Age), mediana_age, Age)
+  ) %>%
+  drop_na(Embarked)
+
+
+# Transformación de variables categóricas en factores
+
+`Survived`, `Pclass`, `Sex` y `Embarked` representan categorías, por lo que se
+transforman en factores. `Age`, `SibSp`, `Parch` y `Fare` se mantienen como
+variables numéricas.
+
+```{r factores}
+titanic_df <- titanic_df %>%
+  mutate(
+    Survived = factor(Survived, levels = c(0, 1)),
+    Pclass = factor(Pclass),
+    Sex = factor(Sex),
+    Embarked = factor(Embarked)
+  )
+
+glimpse(titanic_df)
+
+```
+
+Después de la limpieza, el objeto `titanic_df` contiene solamente las ocho
+variables requeridas, no presenta valores perdidos y tiene las variables
+categóricas transformadas correctamente en factores. 
+
