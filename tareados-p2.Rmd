@@ -1,0 +1,447 @@
+---
+title: "Mineria de Datos: Tarea Dos"
+author: "Nombre Integrante 1, Nombre Integrante 2, Nombre Integrante 3"
+date: "2026"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 7,
+  fig.height = 5,
+  fig.align = "center"
+)
+
+paquetes <- c(
+  "tidyverse",
+  "palmerpenguins",
+  "factoextra",
+  "cluster",
+  "ggrepel",
+  "broom",
+  "knitr",
+  "mclust",
+  "janitor",
+  "patchwork"
+)
+
+instalar <- paquetes[!paquetes %in%installed.packages()[, "Package"]]
+if (length(instalar) > 0) install.packages(instalar, repos = "https://cloud.r-project.org")
+
+library(tidyverse)
+library(palmerpenguins)
+library(factoextra)
+library(cluster)
+library(ggrepel)
+library(broom)
+library(knitr)
+library(janitor)
+library(patchwork)
+
+theme_set(theme_minimal())
+set.seed(123)
+```
+
+# Problema 2: PCA y clustering en pingüinos
+
+## 2.1 Preparación de datos
+
+### a) Carga de datos
+
+```{r cargar-datos}
+data("penguins")
+
+glimpse(penguins)
+summary(penguins)
+```
+
+El dataset original tiene 344 observaciones y 8 variables, de las cuales tres son son categóricas:
+*"species": la especie del pinguino
+*"island": lugar al que pertenice
+*"sex": su sexo
+
+Y el resto son numéricas:
+*"bill_length_mm": largo del pico, en milímetros
+*"bill_depth_mm": profundida del pico, en milímetros
+*"flipper_length_mm": largo de las aletas, en milímetros
+*"body_mass_g": masa corporal, en gramos
+
+### b) Selección de variables morfológicas numéricas
+
+```{r seleccionar-variables}
+vars_morfologicas <- c("bill_length_mm", "bill_depth_mm",
+                        "flipper_length_mm", "body_mass_g")
+
+penguins %>%
+  summarise(across(all_of(vars_morfologicas), ~ sum(is.na(.)))) %>%
+  kable(caption = "Cantidad de valores perdidos")
+```
+
+### c) Eliminación de valores perdidos
+
+```{r limpieza}
+penguins_completos <- penguins %>%
+  drop_na()
+
+nrow(penguins)
+nrow(penguins_completos)
+```
+Considerando la pequeña cantidad de observaciones con valores faltantes se decidió eliminar estos datos. Debido a su tamaño estos no afectarán el estudio de forma considerable, y el imputar nuevos valores podría perjudicar la realización de clustering.
+
+De las 344 filas original se mantuvieron 333 de estas.
+
+### d) Estandarización de variables
+
+```{r estandarizar}
+penguins_num <- penguins_completos %>%
+  select(all_of(vars_morfologicas))
+
+penguins_scaled <- scale(penguins_num)
+
+apply(penguins_scaled, 2, mean) %>% round(10)
+apply(penguins_scaled, 2, sd)
+```
+Es necesario estadarizar porque PCA y clustering son métodos sensibles a la varianza. Cuando las variables tienen escalas muy diferentes (en este caso, "body_mass_g" es mucho mayor a las demás) es posible que unas de estas domine el análisis y oculte la información de las columnas.
+
+Después de estandarizar todas las variables tienen media 0 y desviación estándar 1, de manera que ahora es posible compararlas sin que alguna afecte los resultados de forma excesiva.
+
+
+## 2.2 Visualización exploratoria
+
+```{r viz-masa-especie}
+ggplot(penguins_completos, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  theme_minimal() +
+  labs(
+    title = "Distribución de la masa corporal por especie",
+    x = "Especie", y = "Masa corporal (g)"
+  )
+```
+
+Gentoo es la especia más pesada.
+Adelie y Chinstrap tienen distribuciones similares.
+
+```{r viz-pico}
+ggplot(penguins_completos, aes(x = bill_length_mm, y = bill_depth_mm, color = species)) +
+  geom_point(size = 2, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Longitud vs profundidad del pico",
+    x = "Longitud del pico (mm)", y = "Profundidad del pico (mm)",
+    color = "Especie"
+  )
+```
+
+Gentoo: largos y poco profundos
+Adelie: cortos y profundos
+Chinstrap: largos y profundos
+
+```{r viz-aleta-masa}
+ggplot(penguins_completos, aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point(size = 2, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Largo de aleta vs masa corporal",
+    x = "Largo de la aleta (mm)", y = "Masa corporal (g)",
+    color = "Especie"
+  )
+```
+
+Existe una relación positiva entre el largo de la aleta y la masa corporal. 
+Al igual que el gráfico anterior es posible visualizar la dominancia de Gentoo y la similitud entre Chinstrap y Adelie.
+
+```{r viz-isla}
+ggplot(penguins_completos, aes(x = island, y = body_mass_g, fill = species)) +
+  geom_boxplot(alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Diferencias morfológicas por isla",
+    x = "Isla", y = "Masa corporal (g)", fill = "Especie"
+  )
+```
+
+Gentoo solo habita en Biscoe.
+Chinstrap solo habita en Dream.
+Adelie está presente en todas las islas.
+
+Las diferencias morfológicas pueden ser explicadas por la especie. La isla no provee información relevante. 
+
+## 2.3 PCA
+
+```{r pca-varianza}
+pca_var <- pca_penguins$sdev^2
+pca_var_exp <- pca_var / sum(pca_var)
+pca_var_cum <- cumsum(pca_var_exp)
+
+pca_summary <- tibble(
+  PC = paste0("PC", seq_along(pca_var_exp)),
+  varianza_explicada = pca_var_exp,
+  varianza_acumulada = pca_var_cum
+)
+
+pca_summary %>% kable(digits = 4, caption = "Varianza explicada y acumulada por componente")
+```
+
+```{r componentes-80}
+n80 <- which(pca_var_cum >= 0.80)[1]
+n80
+```
+
+```{r scree-plot}
+sp <- pca_summary %>%
+  mutate(PC = factor(PC, levels = PC)) %>%
+  ggplot(aes(x = PC, y = varianza_explicada)) +
+  geom_col() +
+  geom_point() +
+  labs(
+    title = "Scree Plot",
+    x = "Componente principal",
+    y = "Proporción de varianza explicada"
+  )
+
+sp
+```
+
+```{r pc1-pc2-especie}
+pca_scores <- as_tibble(pca_penguins$x) %>%
+  bind_cols(penguins_completos %>% select(species, island, sex))
+
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = species)) +
+  geom_point(size = 2.2, alpha = 0.85) +
+  stat_ellipse(level = 0.68) +
+  theme_minimal() +
+  labs(
+    title = "PC1 vs PC2 por especie",
+    x = paste0("PC1 (", round(pca_var_exp[1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(pca_var_exp[2] * 100, 1), "%)"),
+    color = "Especie"
+  )
+```
+
+```{r biplot}
+fviz_pca_biplot(
+  pca_penguins,
+  repel = TRUE,
+  addEllipses = TRUE,
+  habillage = penguins_completos$species,
+  label = "var",
+  title = "Biplot PCA"
+)
+
+```
+
+```{r cargas}
+pca_penguins$rotation %>% round(3)
+```
+
+**Respuestas:**
+
+a) PC1 explica el 68% de la varianza.
+
+b) PC2 explica el 19% de la varianza.
+
+c) Los dos primeros componentes son suficientes para explicar la mayoría de la varianza. La suma de sus porcentajes es aproximadamente 88%.
+
+d)De las variables utilizadas en PC1 solo flipper_depth_mm tiene carga negativa, mientras las otras poseen cargas positivas considerables. Es decir, el primer componente utiliza datos de pinguinos grandes cuyos picos tienen poca profundidad. Esto podría interpretarse cómo una preferencia por la especie Gentoo.
+
+PC2 tiene cargas negativas en todas las variables, de las cuales destaca bill_depth_mm, relacionada a la forma del pico de los pinguinos. Esto puede interpretarse como que el segundo componente actúa como complemento del primero, utilizando datos sobre la anatomía de los pinguinos envés de su tamaño.
+
+e)PC1: "flipper_length_mm", "body_mass_g" y "bill_length_mm"
+PC2: "bill_depth_mm" y "bill_
+
+## 2.4 Interpretación biológica y estadística del PCA
+
+a) Si. Tres de las variables tienen cargas positivas y magnitudes considerables. Además, según el análisis anterior es posible ver que tienen relaciones positivas.
+
+b) Si. "bill_depth_mm" tiene una carga distinta, por lo que es posible deducir que PC2 captura la forma pico y considera de forma secondaria las variables relacionadas al tamaño de los pinguinos.
+
+c) Gentoo se claramente de separa las otras especies.
+Existe distinción entre Adelie y Chinstrap por PC2, sin embargo ambas siguien siendo semejantes.
+
+d) Adelie y Chinstrap muestran mayor solapamiento en el espacio, ya que el tamaño de sus pinguinos es relativamente similar en comparación a Gentoo.
+
+e) Después de aplicar PCA es posible interpretar facílmente las cuatro variables morfológicas manteniendo la mayoría de la variabilidad del dataset original.Esto permite visualizar claramente la separación y solapamiento de las especies, junto con identificar patrones en relación al tamaño de los pinguinos y la anatomía de sus picos.
+
+Otra ventaja de PCA es la posibilidad de hacer comparaciones con las variables no utilizadas en su construcción.
+
+```{r pca-extra-plots}
+p_sex <- ggplot(pca_scores, aes(x = sex, y = PC1, fill = sex)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  labs(title = "PC1 según sexo", x = "Sexo", y = "PC1")
+
+p_island <- ggplot(pca_scores, aes(x = island, y = PC1, fill = island)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  labs(title = "PC1 según isla", x = "Isla", y = "PC1")
+
+p_sex + p_island
+```
+En estos gráficos es posible visualizar el diformismo sexual de los animales (los machos tienden a ser más grandes) y la diferencia entre islas. Sin embargo, este último corresponde a un reflejo de las especies que habitan en ellas y no de una verdadera diferencia geográfica significativa.
+
+## 2.5 Clustering con k-means
+
+```{r kmeans}
+set.seed(123)
+
+resultados_k <- map_dfr(2:5, function(k) {
+  km <- kmeans(penguins_scaled, centers = k, nstart = 25)
+  sil <- silhouette(km$cluster, dist(penguins_scaled))
+  tibble(
+    k = k,
+    tot_withinss = km$tot.withinss,
+    avg_silhouette = mean(sil[, "sil_width"])
+  )
+})
+
+resultados_k %>% kable(digits = 3, caption = "Comparación de k = 2, 3, 4, 5")
+```
+
+```{r codo-plot}
+ggplot(resultados_k, aes(x = k, y = tot_withinss)) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 2:5) +
+  theme_minimal() +
+  labs(
+    title = "Método del codo",
+    x = "Número de clusters (k)",
+    y = "Suma total de cuadrados intra-cluster"
+  )
+```
+
+```{r silhouette-plot}
+ggplot(resultados_k, aes(x = k, y = avg_silhouette)) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 2:5) +
+  theme_minimal() +
+  labs(
+    title = "Ancho promedio de silhouette por k",
+    x = "Número de clusters (k)",
+    y = "Silhouette promedio"
+  )
+```
+
+
+a) Codo: La suma disminuye considerablemente después de k=3.
+Silhouette: El mayor valor se encuentra en k=2, posiblemente por la separación entre la especio Gentoo y las demás.
+
+Considerando la cantidad de especies del dataset utilizaremos tres clústers. De esta forma captaremos las diferencias de cada una, manteniendo un valor Silhouette decente.
+
+```{r kmeans-final}
+set.seed(123)
+km_final <- kmeans(penguins_scaled, centers = 3, nstart = 25)
+
+penguins_clustered <- penguins_completos %>%
+  mutate(cluster_kmeans = factor(km_final$cluster)) %>%
+  bind_cols(pca_scores %>% select(PC1, PC2))
+```
+
+**c) Visualización de los clústeres en el espacio PC1-PC2:**
+
+```{r plot-clusters-pca}
+ggplot(penguins_clustered, aes(x = PC1, y = PC2, color = cluster_kmeans)) +
+  geom_point(size = 2.2, alpha = 0.85) +
+  theme_minimal() +
+  labs(
+    title = "Clusters de k-means (k = 3) en el espacio PC1-PC2",
+    x = "PC1", y = "PC2", color = "Cluster"
+  )
+```
+
+**d) / e) Comparación con la especie real y tabla cruzada**
+
+```{r tabla-cruzada}
+tabla_cruzada <- table(
+  Cluster = penguins_clustered$cluster_kmeans,
+  Especie = penguins_clustered$species
+)
+
+tabla_cruzada %>% kable(caption = "Cluster de k-means vs especie real")
+```
+
+```{r ari-kmeans}
+if (requireNamespace("mclust", quietly = TRUE)) {
+  ari_kmeans <- mclust::adjustedRandIndex(
+    penguins_clustered$species, penguins_clustered$cluster_kmeans
+  )
+  ari_kmeans
+}
+```
+f) Es posible ver la uno de clústeres captura exclusivamente a Gentoo, la especie más distinguible, mientras que existe en las especies Adelie y Chinstrap debido a su solapamiento inicial.
+
+El índice ARI indica que se retuvo un valor considerable de distribución original, sin embargo existen deficiencias.
+
+## 2.6 Clustering jerárquico
+
+```{r hclust}
+dist_penguins <- dist(penguins_scaled, method = "euclidean")
+
+hc_complete <- hclust(dist_penguins, method = "complete")
+hc_ward <- hclust(dist_penguins, method = "ward.D2")
+```
+
+```{r dendro-complete, fig.height=5}
+fviz_dend(hc_complete, k = 3, cex = 0.3,
+          main = "Dendrograma - Complete linkage (k = 3)",
+          rect = TRUE)
+```
+
+```{r dendro-ward, fig.height=5}
+fviz_dend(hc_ward, k = 3, cex = 0.3,
+          main = "Dendrograma - Ward (k = 3)",
+          rect = TRUE)
+```
+
+```{r cortar-dendrogramas}
+clusters_complete <- cutree(hc_complete, k = 3)
+clusters_ward <- cutree(hc_ward, k = 3)
+
+penguins_clustered <- penguins_clustered %>%
+  mutate(
+    cluster_hc_complete = factor(clusters_complete),
+    cluster_hc_ward = factor(clusters_ward)
+  )
+```
+
+```{r comparacion-cl}
+table(Cluster = penguins_clustered$cluster_hc_complete, Especie = penguins_clustered$species) %>%
+  kable(caption = "Complete linkage vs especie")
+
+```
+```{r comparacion-ward}
+table(Cluster = penguins_clustered$cluster_hc_ward, Especie = penguins_clustered$species) %>%
+  kable(caption = "Ward vs especie")
+
+```
+
+
+```{r ari-hc}
+if (requireNamespace("mclust", quietly = TRUE)) {
+  ari_complete <- mclust::adjustedRandIndex(penguins_clustered$species, clusters_complete)
+  ari_ward <- mclust::adjustedRandIndex(penguins_clustered$species, clusters_ward)
+  ari_kmeans_vs_ward <- mclust::adjustedRandIndex(clusters_ward, km_final$cluster)
+
+  tibble(
+    metodo = c("k-means", "HC complete", "HC ward"),
+    ARI_vs_especie = c(ari_kmeans, ari_complete, ari_ward)
+  ) %>% kable(digits = 3, caption = "Comparación de métodos vs especie real")
+}
+```
+
+d) Complete Linkage. Este tiene la mejor distribución de especies en sus clústeres y posee el índice ARI más alto.
+
+## 2.7 Discusión avanzada
+
+a) El clustering que agrupa observaciones según similitud en las variables utilizadas, sin embargo no existe garantía de que esos grupos coincidan con una categoría en particular. Es necesario evaluar los resultados mediante otros índices y compararlo con diferentes métodos de agrupación.
+
+b) Cómo vimos anteriormente, existe una diferencia entre el tamaño de los machos y las hembras. Es posible que el clustering esté captando esta característica de forma inadvertida.
+
+c) PCA por si solo es una herramienta útil para visualizar rápidamente los patrones dentro de un dataset. Utilizarlo para clustering simplifica el proceso y reduce el ruido, sin embargo también existe la posibilidad de descartar información debido a su baja varianza. En este caso particular, el clustering realizado perdió alrededor del 12% de la varianza original al utilizar datos PCA como entrada. 
+
+d) Los clusters son un producto de diversos factores (variables, escalamiento, método), de manera que sus resultados varían y en ciertos casos difieren considerablemente de los datos originales. En este caso en particular, hubo una diferencia notable entre el rendimiento de k-means y HC. Para no llegar a conclusiones erróneas estos deben utilizarse cómo herramientas de análisis y no como categorías reales.
