@@ -164,6 +164,163 @@ glimpse(titanic_df)
 
 ```
 
+# 1.2 Visualización exploratoria
+
+En esta sección se utiliza`titanic_df`, que corresponde a los datos limpios y preparados :datos, `aes()` y una geometría de
+`ggplot2`.
+
+## a) Supervivencia según sexo
+
+Primero se calcula la proporción de pasajeros que sobrevivió por cada sexo
+```{r resumen-sexo}
+resumen_sexo <- titanic_df %>%
+  group_by(Sex) %>%
+  summarise(
+    Total = n(),
+    Sobrevivientes = sum(Survived == "1"),
+    Proporcion_supervivencia = Sobrevivientes / Total
+  )
+
+resumen_sexo
+```
+
+```{r grafico-sexo}
+ggplot(
+  resumen_sexo,
+  aes(x = Sex, y = Proporcion_supervivencia)
+) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Proporción de supervivencia según sexo",
+    x = "Sexo",
+    y = "Proporción de supervivencia"
+  ) +
+  theme_minimal()
+```
+
+**Interpretación**. La proporción de supervivencia de las mujeres es mucho
+mayor que la de los hombres. Por lo tanto, el sexo presenta un patrón claro en
+relación con la supervivencia y puede ser una variable relevante para la
+predicción.
+
+## b) Supervivencia según clase del pasajero
+
+Se calcula la proporción de supervivencia dentro de cada clase.
+
+```{r resumen-clase}
+resumen_clase <- titanic_df %>%
+  group_by(Pclass) %>%
+  summarise(
+    Total = n(),
+    Sobrevivientes = sum(Survived == "1"),
+    Proporcion_supervivencia = Sobrevivientes / Total
+  )
+
+resumen_clase
+```
+
+```{r grafico-clase}
+ggplot(
+  resumen_clase,
+  aes(x = Pclass, y = Proporcion_supervivencia)
+) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Proporción de supervivencia según clase",
+    x = "Clase del pasajero",
+    y = "Proporción de supervivencia"
+  ) +
+  theme_minimal()
+```
+
+**Interpretación.** La primera clase presenta la mayor proporción de
+supervivientes, la segunda clase es intermedia y la tercera
+clase presenta la menor proporción. Esto indica que la clase del pasajero puede
+ser importante para predecir la supervivencia.
+
+## c) Distribución de edad según supervivencia
+
+Además del gráfico, se calculan el promedio y la mediana de edad para cada
+resultado de supervivencia.
+
+```{r resumen-edad}
+resumen_edad <- titanic_df %>%
+  group_by(Survived) %>%
+  summarise(
+    Promedio_edad = mean(Age),
+    Mediana_edad = median(Age)
+  )
+
+resumen_edad
+```
+
+```{r grafico-edad}
+ggplot(
+  titanic_df,
+  aes(x = Survived, y = Age)
+) +
+  geom_boxplot() +
+  labs(
+    title = "Distribución de edad según supervivencia",
+    x = "Supervivencia (0 = No, 1 = Sí)",
+    y = "Edad"
+  ) +
+  theme_minimal()
+```
+
+**Interpretación.** Las distribuciones de edad de los supervivientes y de los
+no supervivientes se superponen considerablemente. Sus valores centrales son
+similares, por lo que la edad por sí sola no permite separar claramente ambos
+grupos. Sin embargo, puede aportar información al combinarse con otras
+variables.
+
+## d) Relación entre tarifa pagada y supervivencia
+
+Se comparan el promedio y la mediana de la tarifa pagada en cada grupo.
+
+```{r resumen-fare}
+resumen_fare <- titanic_df %>%
+  group_by(Survived) %>%
+  summarise(
+    Promedio_fare = mean(Fare),
+    Mediana_fare = median(Fare)
+  )
+
+resumen_fare
+```
+
+```{r grafico-fare}
+ggplot(
+  titanic_df,
+  aes(x = Survived, y = Fare)
+) +
+  geom_boxplot() +
+  labs(
+    title = "Tarifa pagada según supervivencia",
+    x = "Supervivencia (0 = No, 1 = Sí)",
+    y = "Tarifa pagada"
+  ) +
+  theme_minimal()
+```
+
+**Interpretación.** Los pasajeros que sobrevivieron presentan, en general,
+tarifas más altas que quienes no sobrevivieron. Esto sugiere que `Fare` puede
+ser útil para la predicción. Sin embargo, la tarifa también está relacionada
+con la clase del pasajero, por lo que ambas variables deben considerarse en el
+modelo.
+
+## Conclusión de la exploración visual
+
+Los patrones más claros se observan en `Sex` y `Pclass`: las mujeres y los
+pasajeros de primera clase presentan mayores proporciones de supervivencia.
+`Fare` también muestra diferencias entre los grupos. En cambio, las
+distribuciones de `Age` presentan mayor superposición, aunque la edad todavía
+puede aportar información junto con los demás predictores.
+
+
+
+
+
 Después de la limpieza, el objeto `titanic_df` contiene solamente las ocho
 variables requeridas, no presenta valores perdidos y tiene las variables
 categóricas transformadas correctamente en factores. 
