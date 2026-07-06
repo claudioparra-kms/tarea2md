@@ -1,6 +1,6 @@
 ---
 title: "Mineria de Datos: Tarea Dos"
-author: "Nombre Integrante 1, Nombre Integrante 2, Nombre Integrante 3"
+author: "Claudio Parra, Gunther Sotelo"
 date: "2026"
 output:
   pdf_document:
