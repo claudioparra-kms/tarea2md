@@ -43,7 +43,7 @@ if (length(to_install) > 0) {
 
 # 1.1 Exploración y limpieza de datos
 
-## a) Carga y descripción del dataset
+# a) Carga y descripción del dataset
 
 Se carga el dataset `titanic_train` desde el paquete `titanic`.
 
@@ -51,7 +51,7 @@ Se carga el dataset `titanic_train` desde el paquete `titanic`.
 data("titanic_train", package = "titanic")
 ```
 
-### Dimensiones del dataset original
+# Dimensiones del dataset original
 
 ```{r dimensiones}
 dim(titanic_train)
@@ -60,7 +60,7 @@ dim(titanic_train)
 El primer valor corresponde a la cantidad de pasajeros y el segundo a la
 cantidad de variables del dataset.
 
-### Tipos de variables
+# Tipos de variables
 
 ```{r tipos}
 glimpse(titanic_train)
@@ -71,7 +71,7 @@ originales, algunas variables que representan categorías aparecen almacenadas
 como números o texto. Estas variables serán transformadas posteriormente en
 factores.
 
-## b) Selección de las variables solicitadas
+# b) Selección de las variables solicitadas
 
 Para la limpieza se consideran las ocho variables indicadas en el enunciado:
 `Survived`, `Pclass`, `Sex`, `Age`, `SibSp`, `Parch`, `Fare` y `Embarked`.
@@ -203,7 +203,7 @@ mayor que la de los hombres. Por lo tanto, el sexo presenta un patrón claro en
 relación con la supervivencia y puede ser una variable relevante para la
 predicción.
 
-## b) Supervivencia según clase del pasajero
+# b) Supervivencia según clase del pasajero
 
 Se calcula la proporción de supervivencia dentro de cada clase.
 
@@ -238,7 +238,7 @@ supervivientes, la segunda clase es intermedia y la tercera
 clase presenta la menor proporción. Esto indica que la clase del pasajero puede
 ser importante para predecir la supervivencia.
 
-## c) Distribución de edad según supervivencia
+# c) Distribución de edad según supervivencia
 
 Además del gráfico, se calculan el promedio y la mediana de edad para cada
 resultado de supervivencia.
@@ -274,7 +274,7 @@ similares, por lo que la edad por sí sola no permite separar claramente ambos
 grupos. Sin embargo, puede aportar información al combinarse con otras
 variables.
 
-## d) Relación entre tarifa pagada y supervivencia
+# d) Relación entre tarifa pagada y supervivencia
 
 Se comparan el promedio y la mediana de la tarifa pagada en cada grupo.
 
@@ -309,7 +309,7 @@ ser útil para la predicción. Sin embargo, la tarifa también está relacionada
 con la clase del pasajero, por lo que ambas variables deben considerarse en el
 modelo.
 
-## Conclusión de la exploración visual
+# Conclusión de la exploración visual
 
 Los patrones más claros se observan en `Sex` y `Pclass`: las mujeres y los
 pasajeros de primera clase presentan mayores proporciones de supervivencia.
