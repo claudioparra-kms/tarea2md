@@ -435,3 +435,231 @@ puede aportar información junto con los demás predictores.
 
 categóricas transformadas correctamente en factores. 
 
+
+
+
+## 1.3 Modelo logístico base
+
+La variable `Survived` tiene dos categorías: 0 indica que el pasajero
+no sobrevivió y 1 indica que sobrevivió. Por esta razón, se utiliza una
+regresión logística mediante `glm()` con binomial.
+
+El modelo incluye los predictores.
+
+```{r modelo-logistico}
+modelo_logistico <- glm(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+  data = titanic_df,
+  family = binomial
+)
+
+summary(modelo_logistico)
+```
+
+La regresión logística modela los log-odds de sobrevivir. Cada coeficiente
+representa el cambio en los log-odds de supervivencia, manteniendo constantes
+las demás variables.
+
+# Categorías de referencia
+
+Antes de interpretar los coeficientes de las variables categóricas, revisar niveles:
+
+```{r niveles-referencia}
+levels(titanic_df$Pclass)
+levels(titanic_df$Sex)
+levels(titanic_df$Embarked)
+```
+
+Las categorías de referencia son:
+
+- Primera clase para `Pclass`.
+- Mujer para `Sex`.
+- Puerto C para `Embarked`.
+
+Los coeficientes de las demás categorías se interpretan en comparación con
+estas categorías de referencia.
+
+### a) Variables significativas
+
+Se utiliza un nivel de significancia de 0,05. Un coeficiente se considera
+estadísticamente significativo cuando su p-valor es menor que 0,05.
+
+```{r variables-significativas}
+tabla_coeficientes <- summary(modelo_logistico)$coefficients
+
+tabla_coeficientes
+
+# Se elimina el intercepto antes de seleccionar los coeficientes significativos
+coeficientes_sin_intercepto <- tabla_coeficientes[-1, , drop = FALSE]
+
+coeficientes_significativos <- coeficientes_sin_intercepto[
+  coeficientes_sin_intercepto[, 4] < 0.05,
+  ,
+  drop = FALSE
+]
+
+coeficientes_significativos
+```
+
+**Interpretación.** Considerando un nivel de 0,05 (dignificancia), los
+coeficientes significativos corresponden a:
+
+- Segunda clase frente a primera clase.
+- Tercera clase frente a primera clase.
+- Hombre frente a mujer.
+- Edad.
+- Número de hermanos o cónyuges a bordo (`SibSp`).
+
+Por lo tanto, las variables que presentan evidencia estadística de asociación
+con la supervivencia son `Pclass`, `Sex`, `Age` y `SibSp`.
+
+En cambio, `Parch`, `Fare` y `Embarked` no presentan coeficientes
+estadísticamente significativos al nivel de 0,05 dentro de este modelo. Esto no
+significa que sean malos, sino que, mantenenen constantes
+las otras variables, no existe suficiente evidencia estadística para afirmar
+que sus coeficientes sean diferentes de cero.
+
+### b) Odds ratios
+
+Los coeficientes del modelo se encuentran en escala de log-odds. Para obtener
+los odds ratios y se aplica la función exponencial.
+
+```{r odds-ratios}
+odds_ratios <- exp(coef(modelo_logistico))
+
+odds_ratios
+```
+
+También se calculan los intervalos de confianza del 95 % para los odds ratios.
+
+```{r tabla-odds-ratios}
+intervalos_or <- exp(confint(modelo_logistico))
+
+tabla_or <- cbind(
+  Beta = coef(modelo_logistico),
+  Odds_Ratio = exp(coef(modelo_logistico)),
+  IC_2.5 = intervalos_or[, 1],
+  IC_97.5 = intervalos_or[, 2]
+)
+
+round(tabla_or, 3)
+```
+
+**Interpretación de segunda clase**
+
+El odds ratio de `Pclass2` es aproximadamente 0,40.
+
+Manteniendo constantes el sexo, edad, familiares, tarifa y puerto de embarque,
+los pasajeros de segunda clase presentan odds de supervivencia equivalentes
+aproximadamente al 40 % de las odds de los pasajeros de primera clase.
+
+Esto también puede expresarse como una reducción aproximada de:
+
+
+# (1 - 0,40)\times 100 = 60\%
+
+
+Por lo tanto, los pasajeros de segunda clase tienen alrededor de un 60 % menos
+odds de sobrevivir que los pasajeros de primera clase, manteniendo constantes
+las demás variables.
+
+**Interpretación de tercera clase**
+
+El odds ratio de `Pclass3` es aproximadamente 0,12.
+
+Manteniendo constantes las demás variables, los pasajeros de tercera clase
+presentan odds de supervivencia equivalentes aproximadamente al 12 % de las
+odds de los pasajeros de primera clase.
+
+Esto corresponde a una reducción aproximada de:
+
+
+# (1 - 0,12)\times 100 = 88\%
+
+
+Por lo tanto, viajar en tercera clase está asociado con odds de supervivencia
+considerablemente menor que viajar en primera clase.
+
+**Interpretación del sexo**
+
+El odds ratio de `Sexmale` es aproximadamente 0,07.
+
+Manteniendo constantes la clase, edad, familiares, tarifa y puerto de
+embarque, los hombres presentan odds de supervivencia equivalentes
+aproximadamente al 7 % de las odds de las mujeres.
+
+Esto corresponde a una reducción cercana al 93 % en las odds de supervivencia
+respecto de las mujeres.
+
+**Interpretación de la edad**
+
+El odds ratio de `Age` es aproximadamente 0,96.
+
+Manteniendo constantes las demás variables, por cada año adicional de edad las
+odds de supervivencia se multiplican por 0,96.
+
+Esto representa una disminución aproximada de:
+
+
+# (1 - 0,96)\times 100 = 4\%
+
+
+en las odds de supervivencia por cada año adicional de edad.
+
+**Interpretación de SibSp**
+ 
+El odds ratio de `SibSp` es aproximadamente 0,73.
+
+Manteniendo constantes las demás variables, por cada hermano o cónyuge
+adicional que está, las odds de supervivencia se multiplican por 0,73.
+
+Esto corresponde a una disminución aproximada de 27 % en las odds de
+supervivencia por cada unidad adicional de `SibSp`.
+
+### c) Significado de un odds ratio mayor o menor que 1
+
+Un odds ratio mayor que 1 indica que, al aumentar el predictor en una unidad,
+aumentan las odds del evento, manteniendo constantes las demás variables.
+
+Por ejemplo, un odds ratio de 1,50 indicaría que las odds del evento se
+multiplican por 1,50, lo que representa un aumento del 50 %.
+
+Un odds ratio menor que 1 indica que las odds del evento disminuyen. Por
+ejemplo, un odds ratio de 0,70 indica que las odds se multiplican por 0,70, lo
+que corresponde a una reducción del 30 %.
+
+Un odds ratio igual o cercano a 1 indica que el predictor produce poco o ningún
+cambio en las odds del evento.
+
+En este problema, el evento modelado es `Survived = 1`, es decir, sobrevivir.
+
+### d) Limitaciones de interpretar solamente la significancia estadística
+
+La significancia estadística indica si existe evidencia de que un coeficiente
+es diferente de cero, pero no permite determinar por sí sola si el modelo
+predice correctamente nuevos pasajeros.
+
+Un predictor puede tener un p-valor pequeño y, aun así, aportar una mejora
+predictiva muy pequeña. Asimismo, una variable puede no ser significativa de
+manera individual y todavía contribuir al modelo cuando se combina con otras
+variables.
+
+Además, el p-valor puede verse afectado por el tamaño de la muestra y no mide
+directamente la magnitud ni la utilidad práctica del efecto.
+
+Para evaluar el desempeño predictivo es necesario utilizar datos que no hayan
+sido usados para ajustar el modelo y calcular métricas como:
+
+- Matriz de confusión.
+- Accuracy.
+- Sensibilidad.
+- Especificidad.
+- Curva ROC.
+- AUC.
+
+Estas evaluaciones se realizarán posteriormente en la sección 1.6. Por lo
+tanto, la significancia estadística es útil para interpretar asociaciones,
+pero no debe confundirse con una buena capacidad predictiva.
+
+
+
