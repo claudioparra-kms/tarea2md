@@ -39,44 +39,48 @@ if (length(to_install) > 0) {
 }
 ```
 
-## Problema 1: Predicción de supervivencia en Titanic
+# Problema 1: Predicción de supervivencia en Titanic
 
-# 1.1 Exploración y limpieza de datos
+## 1.1 Exploración y limpieza de datos
+
+En esta sección se carga el dataset `titanic_train`, se revisan sus
+dimensiones y tipos de variables, se seleccionan las variables solicitadas
+y se tratan los valores perdidos de `Age` y `Embarked`.
+
+```{r paquetes, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(titanic)
+```
 
 ### a) Carga y descripción del dataset
 
-Se carga el dataset `titanic_train` desde el paquete `titanic`.
-
-```{r carga}
+```{r carga-datos}
 data("titanic_train", package = "titanic")
-```
 
 # Dimensiones del dataset original
-
-```{r dimensiones}
 dim(titanic_train)
-```
 
-El primer valor corresponde a la cantidad de pasajeros y el segundo a la
-cantidad de variables del dataset.
-
-# Tipos de variables
-
-```{r tipos}
+# Estructura y tipos de variables
 glimpse(titanic_train)
 ```
 
-`glimpse()` permite observar el nombre y el tipo de cada variable. En los datos
-originales, algunas variables que representan categorías aparecen almacenadas
-como números o texto. Estas variables serán transformadas posteriormente en
+**Interpretación**
+
+El dataset original contiene **891 observaciones y 12 variables**. Cada fila
+representa a un pasajero del Titanic, mientras que las columnas contienen
+información sobre su supervivencia, clase, sexo, edad, cantidad de familiares,
+tarifa pagada, puerto de embarque y otras características.
+
+La función `glimpse()` permite observar los nombres y tipos de las variables.
+Inicialmente, algunas variables categóricas se encuentran almacenadas como
+números o caracteres, por lo que posteriormente serán transformadas en
 factores.
 
-## b) Selección de las variables solicitadas
+### b) Selección de las variables solicitadas
 
-Para la limpieza se consideran las ocho variables indicadas en el enunciado:
-`Survived`, `Pclass`, `Sex`, `Age`, `SibSp`, `Parch`, `Fare` y `Embarked`.
+Se seleccionan las ocho variables indicadas en el enunciado.
 
-```{r seleccion}
+```{r seleccion-variables}
 titanic_seleccion <- titanic_train %>%
   select(
     Survived,
@@ -89,19 +93,32 @@ titanic_seleccion <- titanic_train %>%
     Embarked
   ) %>%
   mutate(
-    # En Embarked los datos ausentes aparecen como texto
-    # Se transforman a NA para poder tranajar con ellos mucho mejor
-    Embarked = ifelse(Embarked == "", NA, Embarked)
+    # Embarked contiene algunos textos vacíos.
+    # Se transforman en NA para que R los reconozca como faltantes.
+    Embarked = ifelse(
+      Embarked == "",
+      NA,
+      Embarked
+    )
   )
 
 glimpse(titanic_seleccion)
 ```
 
-# Porcentaje de valores perdidos por columna
+Las variables seleccionadas son:
 
-Primero se cuenta la cantidad de valores `NA` de cada variable. Después se
-calcula el porcentaje respecto del total de pasajeros.
-```{r faltantes}
+- `Survived`: indica si el pasajero sobrevivió.
+- `Pclass`: clase en la que viajaba.
+- `Sex`: sexo del pasajero.
+- `Age`: edad.
+- `SibSp`: número de hermanos o cónyuges a bordo.
+- `Parch`: número de padres o hijos a bordo.
+- `Fare`: tarifa pagada.
+- `Embarked`: puerto de embarque.
+
+# Porcentaje de valores perdidos
+
+```{r valores-faltantes}
 faltantes <- titanic_seleccion %>%
   summarise(
     Survived = sum(is.na(Survived)),
@@ -126,45 +143,143 @@ faltantes <- titanic_seleccion %>%
 faltantes
 ```
 
-### c) Tratamiento y justificación de los valores perdidos
+**Interpretación de los valores perdidos**
 
-La variable `Age` contiene una cantidad importante de valores perdidos. Si se
-eliminaran todas esas filas, se perderían muchos pasajeros.
+La mayoría de las variables seleccionadas no presenta datos perdidos. Sin
+embargo, `Age` contiene **177 valores faltantes**, equivalentes aproximadamente
+al **19,9 %** de los pasajeros.
 
-En `Embarked` existen solamente dos registros sin información. Como son muy
-pocos casos en comparación con el total de pasajeros, se eliminan esas filas
-mediante `drop_na(Embarked)`.
+La variable `Embarked` presenta solamente **2 valores faltantes**, lo que
+corresponde aproximadamente al **0,2 %** del dataset.
 
+Los datos ausentes de `Embarked` aparecían originalmente como textos vacíos
+`""`. Estos fueron convertidos en `NA`, porque `is.na()` no reconoce un texto
+vacío como un valor perdido.
 
-# Eliminación de los Embarked faltantes.
+### c) Tratamiento de los valores perdidos
 
+Primero se calcula la mediana de la edad sin considerar los valores `NA`.
+
+```{r mediana-edad}
+mediana_age <- median(
+  titanic_seleccion$Age,
+  na.rm = TRUE
+)
+
+mediana_age
+```
+
+La mediana de la edad es **28 años**.
+
+A continuación, las edades faltantes se reemplazan por la mediana y se
+eliminan las dos filas que no contienen información en `Embarked`.
+
+```{r limpieza-faltantes}
 titanic_df <- titanic_seleccion %>%
   mutate(
-    Age = ifelse(is.na(Age), mediana_age, Age)
+    Age = ifelse(
+      is.na(Age),
+      mediana_age,
+      Age
+    )
   ) %>%
   drop_na(Embarked)
+```
 
+**Justificación**
 
-# Transformación de variables categóricas en factores
+En `Age` existe una cantidad considerable de datos perdidos. Eliminar todas
+las filas sin edad significaría perder 177 pasajeros, es decir, casi una
+quinta parte del dataset. Por esta razón, se decidió reemplazar las edades
+faltantes por la mediana.
 
-`Survived`, `Pclass`, `Sex` y `Embarked` representan categorías, por lo que se
-transforman en factores. `Age`, `SibSp`, `Parch` y `Fare` se mantienen como
-variables numéricas.
+La mediana es una medida central que se ve menos afectada por valores extremos
+que la media. Su utilización permite conservar los pasajeros que tienen
+información disponible en las otras variables.
+
+En `Embarked` solamente existen dos registros incompletos. Como representan
+una proporción muy pequeña del total, se decidió eliminar únicamente esas dos
+filas mediante `drop_na(Embarked)`. La pérdida de información producida por
+esta decisión es mínima.
+
+### d) Transformación de variables categóricas
 
 ```{r factores}
 titanic_df <- titanic_df %>%
   mutate(
-    Survived = factor(Survived, levels = c(0, 1)),
-    Pclass = factor(Pclass),
-    Sex = factor(Sex),
-    Embarked = factor(Embarked)
+    Survived = factor(
+      Survived,
+      levels = c(0, 1)
+    ),
+    Pclass = factor(
+      Pclass,
+      levels = c(1, 2, 3)
+    ),
+    Sex = factor(
+      Sex,
+      levels = c("female", "male")
+    ),
+    Embarked = factor(
+      Embarked,
+      levels = c("C", "Q", "S")
+    )
   )
 
 glimpse(titanic_df)
-
 ```
 
-## 1.2 Visualización exploratoria
+Las variables se transformaron de la siguiente manera:
+
+- `Survived` se convirtió en factor porque representa dos categorías:
+  no sobrevivió y sobrevivió.
+- `Pclass` se convirtió en factor porque sus valores 1, 2 y 3 representan
+  clases y no una medida numérica continua.
+- `Sex` se convirtió en factor porque representa categorías.
+- `Embarked` se convirtió en factor porque representa los diferentes puertos
+  de embarque.
+- `Age`, `SibSp`, `Parch` y `Fare` permanecieron como variables numéricas.
+
+# Comprobación final de la limpieza
+
+```{r comprobacion-final}
+# Dimensiones del dataset limpio
+dim(titanic_df)
+
+# Tipos finales de las variables
+glimpse(titanic_df)
+
+# Cantidad de valores perdidos después de la limpieza
+faltantes_finales <- titanic_df %>%
+  summarise(
+    Survived = sum(is.na(Survived)),
+    Pclass = sum(is.na(Pclass)),
+    Sex = sum(is.na(Sex)),
+    Age = sum(is.na(Age)),
+    SibSp = sum(is.na(SibSp)),
+    Parch = sum(is.na(Parch)),
+    Fare = sum(is.na(Fare)),
+    Embarked = sum(is.na(Embarked))
+  )
+
+faltantes_finales
+```
+
+**Interpretación** 
+
+Después de la limpieza, el dataset queda formado por **889 pasajeros y 8
+variables**. La reducción de 891 a 889 observaciones se debe a la eliminación
+de los dos pasajeros sin información en `Embarked`.
+
+Los 177 valores perdidos de `Age` fueron reemplazados por la mediana de 28
+años. La comprobación final muestra que no quedan valores perdidos en las
+variables seleccionadas.
+
+Además, las variables categóricas fueron almacenadas como factores y las
+variables cuantitativas permanecieron como numéricas. Por lo tanto, el objeto
+`titanic_df` queda preparado para realizar las visualizaciones exploratorias y
+ajustar posteriormente el modelo de regresión logística.
+
+### 1.2 Visualización exploratoria
 
 En esta sección se utiliza`titanic_df`, que corresponde a los datos limpios y preparados :datos, `aes()` y una geometría de
 `ggplot2`.
