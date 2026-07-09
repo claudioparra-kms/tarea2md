@@ -662,4 +662,203 @@ tanto, la significancia estadística es útil para interpretar asociaciones,
 pero no debe confundirse con una buena capacidad predictiva.
 
 
+## 1.4 Selección automática por AIC
+
+El modelo logístico completo contiene los predictores `Pclass`, `Sex`, `Age`,
+`SibSp`, `Parch`, `Fare` y `Embarked`.
+
+En esta sección se aplica selección automática de variables mediante el
+criterio AIC. Este criterio busca un equilibrio entre el ajuste del modelo y
+su complejidad. Un modelo puede mejorar su ajuste al incorporar más variables,
+pero el AIC penaliza el aumento innecesario del número de parámetros.
+
+La selección se realiza mediante `stepAIC()` con dirección `"both"`, por lo
+que el procedimiento puede eliminar variables y volver a incorporar alguna
+si esto disminuye el AIC.
+
+```{r seleccion-aic}
+modelo_aic <- MASS::stepAIC(
+  modelo_logistico,
+  direction = "both",
+  trace = FALSE
+)
+
+summary(modelo_aic)
+```
+
+La fórmula del modelo seleccionado puede observarse mediante:
+
+```{r formula-modelo-aic}
+formula(modelo_aic)
+```
+
+### a) Variables seleccionadas
+
+El modelo seleccionado por AIC conserva la siguiente fórmula:
+
+
+# Survived \sim Pclass + Sex + Age + SibSp + Embarked
+
+
+Por lo tanto, las variables seleccionadas son:
+
+- `Pclass`.
+- `Sex`.
+- `Age`.
+- `SibSp`.
+- `Embarked`.
+
+Las variables eliminadas por el procedimiento fueron:
+
+- `Parch`.
+- `Fare`.
+
+**Interpretación.** El procedimiento determinó que conservar `Parch` y `Fare`
+no mejoraba suficientemente el ajuste del modelo como para compensar el
+aumento de complejidad. Por esta razón, ambas variables fueron eliminadas.
+
+Debe considerarse que la selección por AIC no elimina variables solamente por
+tener un p-valor mayor que 0,05. El criterio compara modelos completos y evalúa
+simultáneamente su ajuste y su número de parámetros. Por esto, `Embarked`
+puede permanecer en el modelo aunque alguno de sus niveles no resulte
+estadísticamente significativo de manera individual.
+
+### b) Comparación de la complejidad
+
+Para comparar la cantidad de coeficientes de los modelos se utiliza:
+
+```{r complejidad-modelos}
+numero_coeficientes_completo <- length(
+  coef(modelo_logistico)
+)
+
+numero_coeficientes_aic <- length(
+  coef(modelo_aic)
+)
+
+comparacion_complejidad <- data.frame(
+  Modelo = c(
+    "Modelo completo",
+    "Modelo seleccionado por AIC"
+  ),
+  Numero_coeficientes = c(
+    numero_coeficientes_completo,
+    numero_coeficientes_aic
+  )
+)
+
+comparacion_complejidad
+```
+
+**Interpretación.** El modelo completo contiene siete términos predictores:
+
+
+# Pclass + Sex + Age + SibSp + Parch + Fare + Embarked
+
+
+El modelo seleccionado conserva cinco:
+
+
+# Pclass + Sex + Age + SibSp + Embarked
+
+
+Por lo tanto, el modelo seleccionado por AIC es más simple que el modelo
+completo, porque utiliza dos variables menos.
+
+Al considerar los niveles de los factores, el modelo completo contiene
+aproximadamente 10 coeficientes incluyendo el intercepto, mientras que el
+modelo seleccionado contiene aproximadamente 8. Esto ocurre porque variables
+como `Pclass` y `Embarked` generan más de un coeficiente.
+
+### c) Comparación de los valores AIC
+
+```{r comparacion-aic}
+aic_completo <- AIC(modelo_logistico)
+aic_seleccionado <- AIC(modelo_aic)
+
+comparacion_aic <- data.frame(
+  Modelo = c(
+    "Modelo completo",
+    "Modelo seleccionado por AIC"
+  ),
+  AIC = c(
+    aic_completo,
+    aic_seleccionado
+  )
+)
+
+comparacion_aic
+```
+
+Para calcular cuánto disminuyó el AIC:
+
+```{r diferencia-aic}
+diferencia_aic <- aic_completo - aic_seleccionado
+
+diferencia_aic
+```
+
+Con la limpieza utilizada en la sección 1.1, deberían obtenerse valores
+aproximados de:
+
+- Modelo completo: AIC cercano a **804,42**.
+- Modelo seleccionado: AIC cercano a **801,71**.
+
+La diferencia aproximada es:
+
+
+# 804.42 - 801.71 = 2.71
+
+
+**Interpretación.** El modelo seleccionado presenta un AIC menor que el modelo
+completo. Esto indica que, entre estos dos modelos ajustados con los mismos
+datos y la misma variable respuesta, el modelo seleccionado ofrece un mejor
+equilibrio relativo entre ajuste y complejidad.
+
+Además, consigue este AIC menor utilizando menos variables, por lo que es un
+modelo más parsimonioso.
+
+Los valores exactos que se deben informar son los obtenidos al ejecutar el
+código en RStudio.
+
+### d) ¿Un AIC menor garantiza mejor capacidad predictiva?
+
+No. Un AIC menor indica un mejor equilibrio entre ajuste y complejidad dentro
+de los datos utilizados para ajustar los modelos, pero no mide directamente
+qué tan bien se comportará el modelo frente a pasajeros nuevos.
+
+El procedimiento `stepAIC()` analiza los mismos datos con los que se ajustó el
+modelo. Por lo tanto, todavía puede seleccionar una combinación que funcione
+bien en estos datos, pero que no generalice de la misma manera en una muestra
+diferente.
+
+Además, la selección stepwise presenta algunas limitaciones:
+
+- Puede seleccionar variables distintas si la muestra cambia.
+- Puede ser inestable cuando existen variables correlacionadas.
+- No garantiza encontrar el mejor modelo posible entre todas las
+  combinaciones.
+- Los p-valores del modelo final deben interpretarse con cautela, porque las
+  mismas observaciones fueron utilizadas para seleccionar y ajustar el modelo.
+- Un AIC menor no informa directamente sobre sensibilidad, especificidad,
+  accuracy o AUC.
+
+Por estas razones, el modelo seleccionado debe evaluarse posteriormente en un
+conjunto de prueba o mediante validación cruzada. En la sección 1.6 se
+comparará su capacidad predictiva con la regresión logística completa, Ridge y
+Lasso utilizando matriz de confusión, accuracy, sensibilidad, especificidad y
+AUC.
+
+### Conclusión de la selección por AIC
+
+La selección automática conservó `Pclass`, `Sex`, `Age`, `SibSp` y
+`Embarked`, mientras que eliminó `Parch` y `Fare`.
+
+El modelo seleccionado es más simple que el completo y presenta un AIC menor,
+por lo que entrega un mejor equilibrio relativo entre ajuste y complejidad en
+los datos analizados. Sin embargo, esta ventaja no permite concluir todavía
+que predice mejor a pasajeros nuevos. Esa conclusión debe basarse en la
+evaluación predictiva realizada sobre datos de prueba.
+
+
 
