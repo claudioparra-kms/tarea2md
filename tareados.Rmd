@@ -866,7 +866,7 @@ evaluación predictiva realizada sobre datos de prueba.
 ## 1.5 Ridge y Lasso
 
 Ridge y Lasso son modelos de regresión regularizada. Estos métodos agregan una
-penalización a los coeficientes para evitar que el modelo se vuelva demasiado
+penalizacion a los coeficientes para evitar que el modelo se vuelva demasiado
 complejo.
 
 Ridge disminuye el tamaño de los coeficientes, pero normalmente no los deja
@@ -877,7 +877,7 @@ algunos iguales a cero, por lo que puede servir para seleccionar variables.
 library(glmnet)
 ```
 
-# Preparación de los datos
+# Preparacion de los datos
 
 `glmnet()` necesita una matriz numérica de predictores. Por esta razón se usa
 `model.matrix()`, que transforma los factores en variables dummy.
@@ -900,7 +900,7 @@ table(y_titanic)
 La columna del intercepto se elimina con `[, -1]`, porque `glmnet()` agrega su
 propio intercepto.
 
-Las variables categóricas se transforman en columnas como:
+Las variables categóricas se transforman en columnas:
 
 - `Pclass2`.
 - `Pclass3`.
@@ -931,13 +931,13 @@ modelo_ridge
 ```
 
 Se usa `family = "binomial"` porque `Survived` tiene dos resultados posibles:
-0 si no sobrevivió y 1 si sobrevivió.
+0 si no sobrevivio y 1 si sobrevivio.
 
 Se utiliza validación cruzada con 10 grupos mediante `nfolds = 10`. Esto permite
 probar distintos valores de lambda y estimar cuál funciona mejor.
 
 `standardize = TRUE` estandariza los predictores antes de aplicar la
-penalización. Esto es importante porque, por ejemplo, `Fare` y `Age` están
+penalización. Esto es importante porque `Fare` y `Age` estan
 medidas en escalas distintas.
 
 ```{r grafico-ridge}
@@ -1043,8 +1043,8 @@ comparacion_lambda
 `lambda.min` es el valor de lambda que obtiene el menor error promedio en la
 validación cruzada.
 
-`lambda.1se` usa una penalización mayor y busca un modelo más simple, cuyo
-error todavía se encuentra cerca del error mínimo.
+`lambda.1se` usa una penalización mayor y busca un modelo más simple, 
+error que todavía se encuentra cerca del error mínimo.
 
 Normalmente se cumple:
 
@@ -1056,14 +1056,14 @@ Esto significa que `lambda.1se` aplica una penalización más fuerte.
 
 **Interpretación**
 
-Si se quiere priorizar el menor error de validación cruzada, se puede utilizar
+Si se quiere priorizar el menor error de validación cruzada,utilizar
 `lambda.min`.
 
 Si se quiere un modelo más simple, se puede utilizar `lambda.1se`, porque una
-penalización mayor puede dejar más coeficientes iguales a cero.
+penalización mayor puede dejar más coeficientes igual a cero.
 
 En esta tarea se mostrarán los resultados de ambos valores antes de decidir
-cuál utilizar.
+cual usar
 
 # Coeficientes Lasso usando lambda.min
 
@@ -1162,8 +1162,7 @@ menor.
 coeficientes exactamente en cero. Por esta razón suele producir un modelo más
 simple.
 
-Se habla de coeficientes y no necesariamente de variables completas. Por
-ejemplo, `Pclass2` y `Pclass3` son dos coeficientes, pero ambos pertenecen a la
+ejemplo. `Pclass2` y `Pclass3` son dos coeficientes, pero ambos pertenecen a la
 variable original `Pclass`.
 
 ### e) Variables conservadas por Lasso
@@ -1181,12 +1180,12 @@ La primera lista muestra los coeficientes que Lasso conserva con
 
 La segunda lista muestra los coeficientes conservados con `lambda.1se`.
 
-Los coeficientes que no aparecen en las listas quedaron iguales a cero y, por
+Los coeficientes que no aparecen en las listas quedaron igual a cero y, por
 lo tanto, no son utilizados por ese modelo Lasso.
 
 # Elección para el modelo final
 
-Para esta sección se utilizará `lambda.1se` como una alternativa más simple,
+Para esta sección se utilizará `lambda.1se` como una alternativa,
 pero se conservan los resultados de `lambda.min` para compararlos.
 
 ```{r lasso-final}
@@ -1198,13 +1197,13 @@ lambda_final_lasso
 variables_lasso_final
 ```
 
-Las variables o categorías conservadas por el modelo final son:
+Las variables categorías del modelo final son:
 
 `r paste(variables_lasso_final, collapse = ", ")`.
 
 # Comparación general entre Ridge y Lasso
 
-Ridge y Lasso agregan una penalización a los coeficientes, pero funcionan de
+Ridge y Lasso agregan una penalización a los coeficientes, pero así funcionan de
 manera diferente:
 
 - Ridge utiliza `alpha = 0`.
@@ -1226,6 +1225,3 @@ Los valores de lambda se eligieron utilizando validación cruzada con 10
 grupos. `lambda.min` obtuvo el menor error promedio, mientras que
 `lambda.1se` aplicó una penalización mayor y dejó un modelo más simple.
 
-Las variables exactas conservadas deben informarse usando el resultado que
-entrega RStudio en los bloques `variables_lasso_min` y
-`variables_lasso_1se`.
