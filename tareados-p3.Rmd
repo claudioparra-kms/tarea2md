@@ -1,0 +1,112 @@
+---
+title: "Tarea 2 — Problema 3"
+author: "Claudio Parra, Gunther Sotelo"
+date: "2026"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 7,
+  fig.height = 5,
+  fig.align = "center"
+)
+
+paquetes <- c(
+  "tidyverse", "broom", "MASS", "glmnet", "caret", "pROC",
+  "modeldata", "factoextra", "cluster", "ggrepel", "knitr",
+  "janitor", "patchwork", "mclust"
+)
+
+instalar <- paquetes[!paquetes %in% installed.packages()[, "Package"]]
+if (length(instalar) > 0) install.packages(instalar, repos = "https://cloud.r-project.org")
+
+library(tidyverse)
+library(broom)
+library(MASS)
+library(glmnet)
+library(caret)
+library(pROC)
+library(modeldata)
+library(factoextra) 
+library(cluster)
+library(ggrepel)
+library(knitr)
+library(janitor)
+library(patchwork)
+
+theme_set(theme_minimal())
+set.seed(123)
+```
+
+# Problema 3
+
+## 3.1 Preparación de datos
+
+### a) / b) Carga y descripción
+
+```{r cargar-attrition}
+data(attrition, package = "modeldata")
+
+dim(attrition)
+glimpse(attrition)
+```
+
+```{r na-attrition}
+attrition %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "n_na") %>%
+  arrange(desc(n_na)) %>%
+  head(10) %>%
+  kable(caption = "Valores perdidos por variable (top 10)")
+```
+
+"Atrittion" no muestra datos nulos en ninguna de los variables.
+
+### c) Distribución de la variable respuesta
+
+```{r dist-attrition}
+attrition %>%
+  count(Attrition) %>%
+  mutate(prop = n / sum(n)) %>%
+  kable(digits = 3, caption = "Distribución de Attrition")
+
+ggplot(attrition, aes(x = Attrition, fill = Attrition)) +
+  geom_bar(show.legend = FALSE) +
+  labs(title = "Distribución de la variable respuesta", x = "Attrition", y = "Frecuencia")
+```
+
+### d) Desbalance de clases
+
+Aproximadamente 84% de los empleados permanece y solo 16% deja la empresa, de manera que existe un desbalance de clases considerablemente alto. El problema con esto es que el análisis favorece a la clase mayoritaria, lo cual afectará negativamente la correcta predicción de la segunda clase.
+
+### e) Partición
+
+```{r train-test-split}
+set.seed(123)
+idx <- createDataPartition(attrition$Attrition, p = 0.7, list = FALSE)
+
+train <- attrition[idx, ]
+test  <- attrition[-idx, ]
+
+nrow(train); nrow(test)
+prop.table(table(train$Attrition))
+prop.table(table(test$Attrition))
+```
+
+### f) Variables numéricas y categóricas
+
+```{r vars-tipo}
+vars_numericas <- attrition %>% select(where(is.numeric) %>% names()
+vars_categoricas <- attrition %>% select(where(~ is.factor(.) | is.character(.))) %>% names()
+
+vars_numericas
+vars_categoricas
+```
+
