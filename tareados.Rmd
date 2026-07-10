@@ -1225,3 +1225,705 @@ Los valores de lambda se eligieron utilizando validación cruzada con 10
 grupos. `lambda.min` obtuvo el menor error promedio, mientras que
 `lambda.1se` aplicó una penalización mayor y dejó un modelo más simple.
 
+
+
+
+
+
+## 1.6 Evaluacion predictiva
+
+En esta seccion se comparan los siguientes modelos:
+
+1. Regresion logistica completa.
+2. Regresion logistica seleccionada por AIC.
+3. Ridge.
+4. Lasso.
+
+Primero se separan los datos en entrenamiento y prueba. Los modelos se
+ajustan usando solamente los datos de entrenamiento. Los datos de prueba se
+usan al final para evaluar las predicciones.
+
+```{r paquetes-evaluacion, message=FALSE, warning=FALSE}
+library(glmnet)
+library(pROC)
+```
+
+# Division de los datos en entrenamiento y prueba
+
+Se utiliza un 70 % de los datos para entrenamiento y un 30 % para prueba.
+
+```{r division-datos}
+set.seed(123)
+
+indice_train <- sample(
+  1:nrow(titanic_df),
+  size = floor(0.70 * nrow(titanic_df))
+)
+
+train_titanic <- titanic_df[indice_train, ]
+
+test_titanic <- titanic_df[-indice_train, ]
+
+dim(train_titanic)
+dim(test_titanic)
+```
+
+Se revisa la cantidad y proporcion de sobrevivientes en cada grupo.
+
+```{r distribucion-train-test}
+table(train_titanic$Survived)
+prop.table(table(train_titanic$Survived))
+
+table(test_titanic$Survived)
+prop.table(table(test_titanic$Survived))
+```
+
+**Interpretacion**
+
+El conjunto de entrenamiento contiene aproximadamente el 70 % de los
+pasajeros. Este grupo se utiliza para ajustar los modelos.
+
+El conjunto de prueba contiene el 30 % restante. Estos pasajeros no son usados
+durante el entrenamiento y permiten evaluar como se comportan los modelos con
+datos distintos.
+
+---
+
+### 1. Regresion logistica completa
+
+Se ajusta nuevamente el modelo completo usando solo los datos de
+entrenamiento.
+
+```{r logistica-completa-train}
+modelo_completo_train <- glm(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+  data = train_titanic,
+  family = binomial
+)
+
+summary(modelo_completo_train)
+```
+
+Se calculan las probabilidades de supervivencia para los pasajeros del
+conjunto de prueba.
+
+```{r prediccion-completa}
+prob_completo <- predict(
+  modelo_completo_train,
+  newdata = test_titanic,
+  type = "response"
+)
+
+head(prob_completo)
+```
+
+Se utiliza un punto de corte de 0.5. Si la probabilidad es mayor o igual a
+0.5, el pasajero se clasifica como sobreviviente.
+
+```{r clases-completa}
+pred_completo <- ifelse(
+  prob_completo >= 0.5,
+  1,
+  0
+)
+
+head(pred_completo)
+```
+
+---
+
+### 2. Regresion logistica seleccionada por AIC
+
+La seleccion por AIC tambien se realiza usando solamente los datos de
+entrenamiento.
+
+```{r aic-train}
+modelo_aic_train <- MASS::stepAIC(
+  modelo_completo_train,
+  direction = "both",
+  trace = FALSE
+)
+
+summary(modelo_aic_train)
+
+formula(modelo_aic_train)
+```
+
+La formula mostrada indica las variables que fueron seleccionadas usando los
+datos de entrenamiento.
+
+Se calculan las probabilidades y las clases predichas.
+
+```{r prediccion-aic-test}
+prob_aic <- predict(
+  modelo_aic_train,
+  newdata = test_titanic,
+  type = "response"
+)
+
+pred_aic <- ifelse(
+  prob_aic >= 0.5,
+  1,
+  0
+)
+
+head(prob_aic)
+head(pred_aic)
+```
+
+---
+
+# Preparacion de datos para Ridge y Lasso
+
+`glmnet()` necesita matrices numericas. Por esta razon se utiliza
+`model.matrix()` para transformar los factores en variables dummy.
+
+```{r matrices-glmnet-train-test}
+x_train_titanic <- model.matrix(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+  data = train_titanic
+)[, -1, drop = FALSE]
+
+x_test_titanic <- model.matrix(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+  data = test_titanic
+)[, -1, drop = FALSE]
+
+y_train_titanic <- as.numeric(
+  as.character(train_titanic$Survived)
+)
+
+y_test_titanic <- as.numeric(
+  as.character(test_titanic$Survived)
+)
+
+dim(x_train_titanic)
+dim(x_test_titanic)
+
+table(y_train_titanic)
+table(y_test_titanic)
+```
+
+---
+
+### 3. Modelo Ridge
+
+Ridge se ajusta usando `alpha = 0`.
+
+```{r ridge-entrenamiento}
+set.seed(123)
+
+ridge_train <- cv.glmnet(
+  x = x_train_titanic,
+  y = y_train_titanic,
+  family = "binomial",
+  alpha = 0,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+ridge_train$lambda.min
+ridge_train$lambda.1se
+```
+
+Para comparar la capacidad predictiva se utiliza `lambda.min`, porque es el
+valor que obtuvo el menor error promedio en la validacion cruzada.
+
+```{r prediccion-ridge-test}
+prob_ridge <- predict(
+  ridge_train,
+  newx = x_test_titanic,
+  s = "lambda.min",
+  type = "response"
+)
+
+prob_ridge <- as.numeric(prob_ridge)
+
+pred_ridge <- ifelse(
+  prob_ridge >= 0.5,
+  1,
+  0
+)
+
+head(prob_ridge)
+head(pred_ridge)
+```
+
+---
+
+### 4. Modelo Lasso
+
+Lasso se ajusta usando `alpha = 1`.
+
+```{r lasso-entrenamiento}
+set.seed(123)
+
+lasso_train <- cv.glmnet(
+  x = x_train_titanic,
+  y = y_train_titanic,
+  family = "binomial",
+  alpha = 1,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+lasso_train$lambda.min
+lasso_train$lambda.1se
+```
+
+Para la comparacion predictiva tambien se utiliza `lambda.min`.
+
+```{r prediccion-lasso-test}
+prob_lasso <- predict(
+  lasso_train,
+  newx = x_test_titanic,
+  s = "lambda.min",
+  type = "response"
+)
+
+prob_lasso <- as.numeric(prob_lasso)
+
+pred_lasso <- ifelse(
+  prob_lasso >= 0.5,
+  1,
+  0
+)
+
+head(prob_lasso)
+head(pred_lasso)
+```
+
+---
+
+# Matrices de confusion
+
+La matriz de confusion compara la clase real con la clase predicha.
+
+En este problema:
+
+- Verdadero positivo: sobrevivio y fue predicho como sobreviviente.
+- Verdadero negativo: no sobrevivio y fue predicho como no sobreviviente.
+- Falso positivo: no sobrevivio, pero fue predicho como sobreviviente.
+- Falso negativo: sobrevivio, pero fue predicho como no sobreviviente.
+
+# Matriz del modelo completo
+
+```{r matriz-confusion-completa}
+matriz_completo <- table(
+  Real = factor(
+    y_test_titanic,
+    levels = c(0, 1)
+  ),
+  Predicho = factor(
+    pred_completo,
+    levels = c(0, 1)
+  )
+)
+
+matriz_completo
+```
+
+# Matriz del modelo AIC
+
+```{r matriz-confusion-aic}
+matriz_aic <- table(
+  Real = factor(
+    y_test_titanic,
+    levels = c(0, 1)
+  ),
+  Predicho = factor(
+    pred_aic,
+    levels = c(0, 1)
+  )
+)
+
+matriz_aic
+```
+
+# Matriz del modelo Ridge
+
+```{r matriz-confusion-ridge}
+matriz_ridge <- table(
+  Real = factor(
+    y_test_titanic,
+    levels = c(0, 1)
+  ),
+  Predicho = factor(
+    pred_ridge,
+    levels = c(0, 1)
+  )
+)
+
+matriz_ridge
+```
+
+# Matriz del modelo Lasso
+
+```{r matriz-confusion-lasso}
+matriz_lasso <- table(
+  Real = factor(
+    y_test_titanic,
+    levels = c(0, 1)
+  ),
+  Predicho = factor(
+    pred_lasso,
+    levels = c(0, 1)
+  )
+)
+
+matriz_lasso
+```
+
+---
+
+# Metricas del modelo logistico completo
+
+```{r metricas-logistica-completa}
+VN_completo <- matriz_completo["0", "0"]
+FP_completo <- matriz_completo["0", "1"]
+FN_completo <- matriz_completo["1", "0"]
+VP_completo <- matriz_completo["1", "1"]
+
+accuracy_completo <- (
+  VP_completo + VN_completo
+) / sum(matriz_completo)
+
+sensibilidad_completo <- VP_completo / (
+  VP_completo + FN_completo
+)
+
+especificidad_completo <- VN_completo / (
+  VN_completo + FP_completo
+)
+
+roc_completo <- pROC::roc(
+  y_test_titanic,
+  prob_completo,
+  quiet = TRUE
+)
+
+auc_completo <- as.numeric(
+  pROC::auc(roc_completo)
+)
+
+accuracy_completo
+sensibilidad_completo
+especificidad_completo
+auc_completo
+```
+
+---
+
+# Metricas del modelo AIC
+
+```{r metricas-modelo-aic}
+VN_aic <- matriz_aic["0", "0"]
+FP_aic <- matriz_aic["0", "1"]
+FN_aic <- matriz_aic["1", "0"]
+VP_aic <- matriz_aic["1", "1"]
+
+accuracy_aic <- (
+  VP_aic + VN_aic
+) / sum(matriz_aic)
+
+sensibilidad_aic <- VP_aic / (
+  VP_aic + FN_aic
+)
+
+especificidad_aic <- VN_aic / (
+  VN_aic + FP_aic
+)
+
+roc_aic <- pROC::roc(
+  y_test_titanic,
+  prob_aic,
+  quiet = TRUE
+)
+
+auc_aic <- as.numeric(
+  pROC::auc(roc_aic)
+)
+
+accuracy_aic
+sensibilidad_aic
+especificidad_aic
+auc_aic
+```
+
+---
+
+# Metricas del modelo Ridge
+
+```{r metricas-modelo-ridge}
+VN_ridge <- matriz_ridge["0", "0"]
+FP_ridge <- matriz_ridge["0", "1"]
+FN_ridge <- matriz_ridge["1", "0"]
+VP_ridge <- matriz_ridge["1", "1"]
+
+accuracy_ridge <- (
+  VP_ridge + VN_ridge
+) / sum(matriz_ridge)
+
+sensibilidad_ridge <- VP_ridge / (
+  VP_ridge + FN_ridge
+)
+
+especificidad_ridge <- VN_ridge / (
+  VN_ridge + FP_ridge
+)
+
+roc_ridge <- pROC::roc(
+  y_test_titanic,
+  prob_ridge,
+  quiet = TRUE
+)
+
+auc_ridge <- as.numeric(
+  pROC::auc(roc_ridge)
+)
+
+accuracy_ridge
+sensibilidad_ridge
+especificidad_ridge
+auc_ridge
+```
+
+---
+
+# Metricas del modelo Lasso
+
+```{r metricas-modelo-lasso}
+VN_lasso <- matriz_lasso["0", "0"]
+FP_lasso <- matriz_lasso["0", "1"]
+FN_lasso <- matriz_lasso["1", "0"]
+VP_lasso <- matriz_lasso["1", "1"]
+
+accuracy_lasso <- (
+  VP_lasso + VN_lasso
+) / sum(matriz_lasso)
+
+sensibilidad_lasso <- VP_lasso / (
+  VP_lasso + FN_lasso
+)
+
+especificidad_lasso <- VN_lasso / (
+  VN_lasso + FP_lasso
+)
+
+roc_lasso <- pROC::roc(
+  y_test_titanic,
+  prob_lasso,
+  quiet = TRUE
+)
+
+auc_lasso <- as.numeric(
+  pROC::auc(roc_lasso)
+)
+
+accuracy_lasso
+sensibilidad_lasso
+especificidad_lasso
+auc_lasso
+```
+
+---
+
+# Tabla de comparacion de modelos
+
+```{r comparacion-modelos}
+comparacion_modelos <- data.frame(
+  Modelo = c(
+    "Logistica completa",
+    "Logistica AIC",
+    "Ridge",
+    "Lasso"
+  ),
+  Accuracy = c(
+    accuracy_completo,
+    accuracy_aic,
+    accuracy_ridge,
+    accuracy_lasso
+  ),
+  Sensibilidad = c(
+    sensibilidad_completo,
+    sensibilidad_aic,
+    sensibilidad_ridge,
+    sensibilidad_lasso
+  ),
+  Especificidad = c(
+    especificidad_completo,
+    especificidad_aic,
+    especificidad_ridge,
+    especificidad_lasso
+  ),
+  AUC = c(
+    auc_completo,
+    auc_aic,
+    auc_ridge,
+    auc_lasso
+  )
+)
+
+comparacion_modelos
+```
+
+Se redondean los resultados para que sean mas faciles de leer.
+
+```{r comparacion-modelos-redondeada}
+comparacion_redondeada <- comparacion_modelos
+
+comparacion_redondeada$Accuracy <- round(
+  comparacion_redondeada$Accuracy,
+  3
+)
+
+comparacion_redondeada$Sensibilidad <- round(
+  comparacion_redondeada$Sensibilidad,
+  3
+)
+
+comparacion_redondeada$Especificidad <- round(
+  comparacion_redondeada$Especificidad,
+  3
+)
+
+comparacion_redondeada$AUC <- round(
+  comparacion_redondeada$AUC,
+  3
+)
+
+comparacion_redondeada
+```
+
+---
+
+# Identificacion de los mejores resultados
+
+```{r mejores-modelos}
+mejor_modelo_auc <- comparacion_modelos$Modelo[
+  which.max(comparacion_modelos$AUC)
+]
+
+mejor_modelo_accuracy <- comparacion_modelos$Modelo[
+  which.max(comparacion_modelos$Accuracy)
+]
+
+mejor_modelo_sensibilidad <- comparacion_modelos$Modelo[
+  which.max(comparacion_modelos$Sensibilidad)
+]
+
+mejor_modelo_especificidad <- comparacion_modelos$Modelo[
+  which.max(comparacion_modelos$Especificidad)
+]
+
+mejor_modelo_auc
+mejor_modelo_accuracy
+mejor_modelo_sensibilidad
+mejor_modelo_especificidad
+```
+
+Se calcula la diferencia entre el mejor AUC y el AUC del modelo seleccionado
+por AIC.
+
+```{r diferencia-auc-modelos}
+mejor_auc <- max(
+  comparacion_modelos$AUC
+)
+
+auc_aic_comparacion <- comparacion_modelos$AUC[
+  comparacion_modelos$Modelo == "Logistica AIC"
+]
+
+diferencia_auc <- mejor_auc - auc_aic_comparacion
+
+diferencia_auc
+```
+
+---
+
+### a) Cual modelo tiene mejor desempeno predictivo
+
+El modelo que obtuvo el mayor AUC fue:
+
+`r mejor_modelo_auc`.
+
+Su AUC fue aproximadamente:
+
+`r round(mejor_auc, 3)`.
+
+El modelo que obtuvo la mayor accuracy fue:
+
+`r mejor_modelo_accuracy`.
+
+No se debe elegir un modelo mirando solamente la accuracy. Tambien es
+importante revisar la sensibilidad, la especificidad y la matriz de confusion.
+
+La sensibilidad indica que proporcion de los pasajeros que realmente
+sobrevivieron fue detectada por el modelo.
+
+La especificidad indica que proporcion de los pasajeros que realmente no
+sobrevivieron fue clasificada correctamente.
+
+El AUC permite comparar la capacidad general de los modelos para separar
+sobrevivientes y no sobrevivientes usando distintos puntos de corte.
+
+---
+
+### b) Cual modelo es mas interpretable
+
+El modelo seleccionado por AIC es el mas facil de interpretar.
+
+Este modelo sigue siendo una regresion logistica, por lo que sus coeficientes
+pueden transformarse en odds ratios.
+
+Ademas, normalmente utiliza menos variables que el modelo completo.
+
+Ridge y Lasso tambien entregan coeficientes, pero estos se encuentran
+penalizados. Lasso ademas trabaja con columnas dummy, por lo que la
+interpretacion puede ser menos directa.
+
+---
+
+### c) Existe una diferencia importante entre el modelo mas interpretable y el mas predictivo
+
+La diferencia de AUC entre el mejor modelo y el modelo AIC fue:
+
+`r round(diferencia_auc, 3)`.
+
+Si la diferencia es pequena y las demas metricas tambien son parecidas, no
+existe una ventaja predictiva grande.
+
+En ese caso, puede ser mejor usar el modelo AIC, porque es mas simple y mas
+facil de explicar.
+
+Si la diferencia es grande, entonces el modelo con mayor AUC presenta una
+ventaja predictiva mas clara.
+
+La conclusion debe basarse en los resultados mostrados en
+`comparacion_redondeada`.
+
+---
+
+### d) Que modelo se recomienda y por que
+
+Si el objetivo principal es obtener la mejor prediccion, se recomienda el
+modelo:
+
+`r mejor_modelo_auc`.
+
+Este modelo obtuvo el mayor valor de AUC en el conjunto de prueba.
+
+Sin embargo, si los resultados de los cuatro modelos son muy parecidos, se
+puede recomendar el modelo seleccionado por AIC.
+
+El modelo AIC es mas simple y permite interpretar sus coeficientes mediante
+odds ratios.
+
+Por lo tanto:
+
+- Para prediccion se puede elegir el modelo con mayor AUC.
+- Para interpretacion se puede elegir el modelo AIC.
+- Si el desempeno es parecido, es razonable preferir el modelo mas simple.
+
+---
+
