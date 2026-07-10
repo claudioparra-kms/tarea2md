@@ -862,3 +862,370 @@ evaluación predictiva realizada sobre datos de prueba.
 
 
 
+
+## 1.5 Ridge y Lasso
+
+Ridge y Lasso son modelos de regresión regularizada. Estos métodos agregan una
+penalización a los coeficientes para evitar que el modelo se vuelva demasiado
+complejo.
+
+Ridge disminuye el tamaño de los coeficientes, pero normalmente no los deja
+exactamente en cero. Lasso también reduce los coeficientes, pero puede dejar
+algunos iguales a cero, por lo que puede servir para seleccionar variables.
+
+```{r paquete-glmnet, message=FALSE, warning=FALSE}
+library(glmnet)
+```
+
+# Preparación de los datos
+
+`glmnet()` necesita una matriz numérica de predictores. Por esta razón se usa
+`model.matrix()`, que transforma los factores en variables dummy.
+
+```{r matriz-regularizacion}
+x_titanic <- model.matrix(
+  Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+  data = titanic_df
+)[, -1]
+
+y_titanic <- as.numeric(
+  as.character(titanic_df$Survived)
+)
+
+dim(x_titanic)
+head(x_titanic)
+table(y_titanic)
+```
+
+La columna del intercepto se elimina con `[, -1]`, porque `glmnet()` agrega su
+propio intercepto.
+
+Las variables categóricas se transforman en columnas como:
+
+- `Pclass2`.
+- `Pclass3`.
+- `Sexmale`.
+- `EmbarkedQ`.
+- `EmbarkedS`.
+
+Estas columnas comparan cada categoría con la categoría de referencia usada en
+las secciones anteriores.
+
+### a) Ridge regression
+
+Para ajustar Ridge se utiliza `alpha = 0`.
+
+```{r modelo-ridge}
+set.seed(123)
+
+modelo_ridge <- cv.glmnet(
+  x = x_titanic,
+  y = y_titanic,
+  family = "binomial",
+  alpha = 0,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+modelo_ridge
+```
+
+Se usa `family = "binomial"` porque `Survived` tiene dos resultados posibles:
+0 si no sobrevivió y 1 si sobrevivió.
+
+Se utiliza validación cruzada con 10 grupos mediante `nfolds = 10`. Esto permite
+probar distintos valores de lambda y estimar cuál funciona mejor.
+
+`standardize = TRUE` estandariza los predictores antes de aplicar la
+penalización. Esto es importante porque, por ejemplo, `Fare` y `Age` están
+medidas en escalas distintas.
+
+```{r grafico-ridge}
+plot(modelo_ridge)
+```
+
+En el gráfico se observa el error de validación cruzada para distintos valores
+de lambda.
+
+```{r lambdas-ridge}
+lambda_min_ridge <- modelo_ridge$lambda.min
+lambda_1se_ridge <- modelo_ridge$lambda.1se
+
+lambda_min_ridge
+lambda_1se_ridge
+```
+
+También se pueden revisar los coeficientes de Ridge con ambos valores de
+lambda.
+
+```{r coeficientes-ridge}
+coef_ridge_min <- coef(
+  modelo_ridge,
+  s = "lambda.min"
+)
+
+coef_ridge_1se <- coef(
+  modelo_ridge,
+  s = "lambda.1se"
+)
+
+coef_ridge_min
+coef_ridge_1se
+```
+
+**Interpretación de Ridge**
+
+Ridge conserva los predictores, pero reduce el tamaño de sus coeficientes.
+
+Cuando lambda aumenta, la penalización es más fuerte y los coeficientes se
+acercan más a cero. Sin embargo, Ridge normalmente no los deja exactamente en
+cero, por lo que no elimina variables completamente.
+
+En este caso, Ridge puede ayudar a obtener un modelo más estable y evitar que
+algunos coeficientes sean demasiado grandes.
+
+### b) Lasso regression
+
+Para ajustar Lasso se utiliza `alpha = 1`.
+
+```{r modelo-lasso}
+set.seed(123)
+
+modelo_lasso <- cv.glmnet(
+  x = x_titanic,
+  y = y_titanic,
+  family = "binomial",
+  alpha = 1,
+  nfolds = 10,
+  standardize = TRUE
+)
+
+modelo_lasso
+```
+
+```{r grafico-lasso}
+plot(modelo_lasso)
+```
+
+En el gráfico aparecen dos líneas verticales. Una representa `lambda.min` y la
+otra representa `lambda.1se`.
+
+### c) Selección de lambda mediante validación cruzada
+
+```{r lambdas-lasso}
+lambda_min_lasso <- modelo_lasso$lambda.min
+lambda_1se_lasso <- modelo_lasso$lambda.1se
+
+lambda_min_lasso
+lambda_1se_lasso
+```
+
+Se construye una tabla para comparar Ridge y Lasso.
+
+```{r comparacion-lambdas}
+comparacion_lambda <- data.frame(
+  Modelo = c("Ridge", "Lasso"),
+  Lambda_min = c(
+    lambda_min_ridge,
+    lambda_min_lasso
+  ),
+  Lambda_1se = c(
+    lambda_1se_ridge,
+    lambda_1se_lasso
+  )
+)
+
+comparacion_lambda
+```
+
+### d) Comparación entre lambda.min y lambda.1se
+
+`lambda.min` es el valor de lambda que obtiene el menor error promedio en la
+validación cruzada.
+
+`lambda.1se` usa una penalización mayor y busca un modelo más simple, cuyo
+error todavía se encuentra cerca del error mínimo.
+
+Normalmente se cumple:
+
+\[
+\lambda_{1se} > \lambda_{min}
+\]
+
+Esto significa que `lambda.1se` aplica una penalización más fuerte.
+
+**Interpretación**
+
+Si se quiere priorizar el menor error de validación cruzada, se puede utilizar
+`lambda.min`.
+
+Si se quiere un modelo más simple, se puede utilizar `lambda.1se`, porque una
+penalización mayor puede dejar más coeficientes iguales a cero.
+
+En esta tarea se mostrarán los resultados de ambos valores antes de decidir
+cuál utilizar.
+
+# Coeficientes Lasso usando lambda.min
+
+```{r lasso-coeficientes-min}
+coef_lasso_min <- as.matrix(
+  coef(
+    modelo_lasso,
+    s = "lambda.min"
+  )
+)
+
+tabla_lasso_min <- data.frame(
+  Variable = rownames(coef_lasso_min),
+  Coeficiente = as.numeric(coef_lasso_min),
+  row.names = NULL
+)
+
+tabla_lasso_min <- tabla_lasso_min[
+  tabla_lasso_min$Variable != "(Intercept)" &
+    tabla_lasso_min$Coeficiente != 0,
+]
+
+tabla_lasso_min
+```
+
+Se ordenan los coeficientes desde el de mayor magnitud hasta el menor.
+
+```{r ordenar-lasso-min}
+tabla_lasso_min <- tabla_lasso_min[
+  order(
+    abs(tabla_lasso_min$Coeficiente),
+    decreasing = TRUE
+  ),
+]
+
+tabla_lasso_min
+```
+
+# Coeficientes Lasso usando lambda.1se
+
+```{r lasso-coeficientes-1se}
+coef_lasso_1se <- as.matrix(
+  coef(
+    modelo_lasso,
+    s = "lambda.1se"
+  )
+)
+
+tabla_lasso_1se <- data.frame(
+  Variable = rownames(coef_lasso_1se),
+  Coeficiente = as.numeric(coef_lasso_1se),
+  row.names = NULL
+)
+
+tabla_lasso_1se <- tabla_lasso_1se[
+  tabla_lasso_1se$Variable != "(Intercept)" &
+    tabla_lasso_1se$Coeficiente != 0,
+]
+
+tabla_lasso_1se <- tabla_lasso_1se[
+  order(
+    abs(tabla_lasso_1se$Coeficiente),
+    decreasing = TRUE
+  ),
+]
+
+tabla_lasso_1se
+```
+
+# Comparación de coeficientes conservados
+
+```{r cantidad-coeficientes-lasso}
+cantidad_coeficientes_min <- nrow(tabla_lasso_min)
+cantidad_coeficientes_1se <- nrow(tabla_lasso_1se)
+
+comparacion_coeficientes <- data.frame(
+  Lambda = c(
+    "lambda.min",
+    "lambda.1se"
+  ),
+  Coeficientes_distintos_de_cero = c(
+    cantidad_coeficientes_min,
+    cantidad_coeficientes_1se
+  )
+)
+
+comparacion_coeficientes
+```
+
+**Interpretación**
+
+`lambda.min` normalmente conserva más coeficientes, porque su penalización es
+menor.
+
+`lambda.1se` aplica una penalización mayor, por lo que puede dejar más
+coeficientes exactamente en cero. Por esta razón suele producir un modelo más
+simple.
+
+Se habla de coeficientes y no necesariamente de variables completas. Por
+ejemplo, `Pclass2` y `Pclass3` son dos coeficientes, pero ambos pertenecen a la
+variable original `Pclass`.
+
+### e) Variables conservadas por Lasso
+
+```{r variables-conservadas}
+variables_lasso_min <- tabla_lasso_min$Variable
+variables_lasso_1se <- tabla_lasso_1se$Variable
+
+variables_lasso_min
+variables_lasso_1se
+```
+
+La primera lista muestra los coeficientes que Lasso conserva con
+`lambda.min`.
+
+La segunda lista muestra los coeficientes conservados con `lambda.1se`.
+
+Los coeficientes que no aparecen en las listas quedaron iguales a cero y, por
+lo tanto, no son utilizados por ese modelo Lasso.
+
+# Elección para el modelo final
+
+Para esta sección se utilizará `lambda.1se` como una alternativa más simple,
+pero se conservan los resultados de `lambda.min` para compararlos.
+
+```{r lasso-final}
+lambda_final_lasso <- modelo_lasso$lambda.1se
+
+variables_lasso_final <- variables_lasso_1se
+
+lambda_final_lasso
+variables_lasso_final
+```
+
+Las variables o categorías conservadas por el modelo final son:
+
+`r paste(variables_lasso_final, collapse = ", ")`.
+
+# Comparación general entre Ridge y Lasso
+
+Ridge y Lasso agregan una penalización a los coeficientes, pero funcionan de
+manera diferente:
+
+- Ridge utiliza `alpha = 0`.
+- Lasso utiliza `alpha = 1`.
+- Ridge reduce los coeficientes, pero normalmente no los elimina.
+- Lasso puede dejar algunos coeficientes exactamente en cero.
+- `lambda.min` busca el menor error de validación cruzada.
+- `lambda.1se` busca un modelo más simple con un error cercano al mínimo.
+
+**Interpretacion**
+
+Ridge conserva todos los predictores, pero disminuye el tamaño de sus
+coeficientes.
+
+Lasso puede eliminar algunos predictores o categorías al dejar sus
+coeficientes iguales a cero.
+
+Los valores de lambda se eligieron utilizando validación cruzada con 10
+grupos. `lambda.min` obtuvo el menor error promedio, mientras que
+`lambda.1se` aplicó una penalización mayor y dejó un modelo más simple.
+
+Las variables exactas conservadas deben informarse usando el resultado que
+entrega RStudio en los bloques `variables_lasso_min` y
+`variables_lasso_1se`.
