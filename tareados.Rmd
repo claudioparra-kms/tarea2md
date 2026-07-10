@@ -1926,4 +1926,3 @@ Por lo tanto:
 - Si el desempeno es parecido, es razonable preferir el modelo mas simple.
 
 ---
-
