@@ -27,9 +27,9 @@ paquetes <- c(
 instalar <- paquetes[!paquetes %in% installed.packages()[, "Package"]]
 if (length(instalar) > 0) install.packages(instalar, repos = "https://cloud.r-project.org")
 
+library(MASS)
 library(tidyverse)
 library(broom)
-library(MASS)
 library(glmnet)
 library(caret)
 library(pROC)
@@ -43,6 +43,9 @@ library(patchwork)
 
 theme_set(theme_minimal())
 set.seed(123)
+
+select <- dplyr::select
+filter <- dplyr::filter
 ```
 
 # Problema 3
@@ -76,10 +79,6 @@ attrition %>%
   count(Attrition) %>%
   mutate(prop = n / sum(n)) %>%
   kable(digits = 3, caption = "Distribución de Attrition")
-
-ggplot(attrition, aes(x = Attrition, fill = Attrition)) +
-  geom_bar(show.legend = FALSE) +
-  labs(title = "Distribución de la variable respuesta", x = "Attrition", y = "Frecuencia")
 ```
 
 ### d) Desbalance de clases
@@ -103,10 +102,372 @@ prop.table(table(test$Attrition))
 ### f) Variables numéricas y categóricas
 
 ```{r vars-tipo}
-vars_numericas <- attrition %>% select(where(is.numeric) %>% names()
+vars_numericas <- attrition %>% select(where(is.numeric)) %>% names()
 vars_categoricas <- attrition %>% select(where(~ is.factor(.) | is.character(.))) %>% names()
 
 vars_numericas
 vars_categoricas
 ```
+### g) Estrategia de preprocesamiento
 
+
+La estrategia a utilizar corresponde en:
+
+1. Identificar variables con baja varianza y eliminarlas, ya que no aportan información al análisis.
+
+2. Verificar que las variables categóricas son factores y no texto para así utilizarlas.
+
+2. Generar variables dummy antes de computar ridge y lasso, ya que estas requieren de matrices numéricas.
+   
+3. Estandarizar antes de aplicar PCA, ya que este método es sensible a las escalas grandes.
+   
+   
+```{r nzv}
+nzv <- nearZeroVar(train, saveMetrics = TRUE) %>%
+  rownames_to_column("variable")
+
+nzv %>% filter(nzv) %>% kable(caption = "Variables con varianza baja")
+```
+
+```{r quitar-constantes}
+vars_constantes <- nzv %>% filter(zeroVar) %>% pull(variable)
+vars_constantes
+
+train <- train %>% select(-any_of(vars_constantes))
+test  <- test  %>% select(-any_of(vars_constantes))
+```
+
+## 3.2 Visualización exploratoria
+
+```{r viz-overtime}
+attrition %>%
+  count(OverTime, Attrition) %>%
+  group_by(OverTime) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = OverTime, y = prop, fill = Attrition)) +
+  geom_col(position = "stack") +
+  labs(title = "Proporción de rotación según horas extra (OverTime)",
+       x = "Trabaja horas extra", y = "Proporción")
+```
+
+```{r viz-income}
+ggplot(attrition, aes(x = Attrition, y = MonthlyIncome, fill = Attrition)) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(title = "Ingreso mensual según Attrition", x = "Attrition", y = "Ingreso mensual")
+```
+
+```{r viz-age}
+attrition %>%
+  mutate(age_grupo = cut(Age, breaks = seq(15, 65, by = 10))) %>%
+  count(age_grupo, Attrition) %>%
+  group_by(age_grupo) %>%
+  mutate(prop = n / sum(n)) %>%
+  filter(Attrition == "Yes") %>%
+  ggplot(aes(x = age_grupo, y = prop, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Proporción de rotación según edad",
+       x = "Rango de edad", y = "Proporción que deja la empresa")
+```
+
+```{r viz-jobrole}
+attrition %>%
+  count(JobRole, Attrition) %>%
+  group_by(JobRole) %>%
+  mutate(prop = n / sum(n)) %>%
+  filter(Attrition == "Yes") %>%
+  ggplot(aes(x = reorder(JobRole, prop), y = prop)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Proporción de rotación según cargo (JobRole)",
+       x = "Cargo", y = "Proporción que deja la empresa")
+```
+
+```{r viz-years}
+attrition %>%
+  mutate(antiguedad_grupo = cut(YearsAtCompany, breaks = c(0, 5, 10, 15, 20, 25, Inf),
+                                 right = FALSE)) %>%
+  count(antiguedad_grupo, Attrition) %>%
+  group_by(antiguedad_grupo) %>%
+  mutate(prop = n / sum(n)) %>%
+  filter(Attrition == "Yes") %>%
+  ggplot(aes(x = antiguedad_grupo, y = prop, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Proporción de rotación según antigüedad",
+       x = "Años en la empresa", y = "Proporción que deja la empresa")
+```
+
+```{r viz-extra}
+ggplot(attrition, aes(x = JobSatisfaction, fill = Attrition)) +
+  geom_bar(position = "fill") +
+  labs(title = "Proporción de rotación según satisfacción laboral",
+       x = "Nivel de satisfacción laboral", y = "Proporción",
+       fill = "Attrition")
+```
+
+**Respuestas:**
+
+a) Las variables asociadas a mayor rotación corresponden a "OverTime", "MonthlyIncome", "Age", "YearsAtCompany" y "JobSatisfaction". Específicamente, valores bajas en estas variables (tiempo extra siendo la excepción) parecen aumentar la probabilidad de retirarse de la compañia. Además de esto, ciertas posiciones parecen tener índices de rotación más altos ("Sales Representative", "Laboratory Technician").
+
+b) "OverTime", "MonthlyIncome" y "YearsAtCompany" son las variables con las diferencias más marcadas, por lo tanto es posible usar la la combinación de horas extra, bajos ingresos y baja antigüedad para construir el modelo.
+
+c) Durante los primeros años de trabajo el riesgo de rotación es mayor, sin embargo esto se estabiliza. Lo mismo ocurre con la edad de los empleados. Es posible que ambas variables estén relacionadas y sea beneficioso analizarlas por tramos.
+
+## 3.3 Modelo logístico interpretable
+
+```{r modelo-interpretable}
+modelo_interpretable <- glm(
+  Attrition ~ Age + MonthlyIncome + OverTime + JobSatisfaction +
+    YearsAtCompany + DistanceFromHome + JobLevel + WorkLifeBalance +
+    TotalWorkingYears + JobRole,
+  data = train,
+  family = binomial
+)
+
+summary(modelo_interpretable)
+
+tidy(modelo_interpretable, exponentiate = TRUE, conf.int = TRUE) %>%
+  kable(digits = 3, caption = "Odds ratios del modelo")
+```
+
+**Respuestas:**
+
+a) Las variables más significativas corresponden a menor "MonthlyIncome", menor "JobSatisfaction", menor "YearsAtCompany" y menor "WorkLifeBalance", lo cual concuerda con la exploración inicial. Además destacan los puestos "Human Resources", "Sales Representative" y "Laboratory Technician".
+
+b) - `OverTimeYes`: Considerablemente mayor. El trabajar horas extra aumenta la probabilidad de dejar la empresa.
+   - `MonthlyIncome`: Menor a 1 pero cercano. Indica que por cada unidad extra de ingresos (dólares) la probabilidad de rotación se reduce.
+   - `JobSatisfaction`: Menor a 1. Una mejor satisfacción laboral reduce las chances de rotación.
+   - `YearsAtCompany`: Menor a 1. Llevar más tiempo en la empresa hace que el trabajador tienda a quedarse.
+   - `DistanceFromHome`: Mayor a 1. Vivir lejos del lugar de trabajo aumenta la probabilidad de renunciar.
+
+c) OR > 1. Un aumento en la variable predictora se asocia a un aumento de que ocurra el evento.
+
+c) OR > 1. Un aumento en la variable predictora se asocia a una disminución de que ocurra el evento.
+
+e) "OverTime", "WorkLifeBalance" y "JobSatisfaction" son las más útiles, ya que es posible establecer límites en cuanto a horas extra y mejorar el ambiente laboral.
+
+## 3.4 Selección automática por AIC
+
+```{r modelo-completo-aic}
+modelo_completo <- glm(
+  Attrition ~ Age + DailyRate + DistanceFromHome + Education +
+    EnvironmentSatisfaction + Gender + HourlyRate + JobInvolvement +
+    JobLevel + JobRole + JobSatisfaction + MaritalStatus +
+    MonthlyIncome + MonthlyRate + NumCompaniesWorked + OverTime +
+    PercentSalaryHike + PerformanceRating + RelationshipSatisfaction +
+    StockOptionLevel + TotalWorkingYears + TrainingTimesLastYear +
+    WorkLifeBalance + YearsAtCompany + YearsInCurrentRole +
+    YearsSinceLastPromotion + YearsWithCurrManager,
+  data = train,
+  family = binomial
+)
+
+modelo_nulo <- glm(Attrition ~ 1, data = train, family = binomial)
+
+modelo_step <- stepAIC(
+  modelo_nulo,
+  scope = list(lower = modelo_nulo, upper = modelo_completo),
+  direction = "both",
+  trace = FALSE
+)
+
+summary(modelo_step)
+formula(modelo_step)
+
+tibble(
+  modelo = c("completo", "seleccionado por AIC"),
+  AIC = c(AIC(modelo_completo), AIC(modelo_step)),
+  n_predictores = c(
+    length(coef(modelo_completo)) - 1,
+    length(coef(modelo_step)) - 1
+  )
+) %>% kable(digits = 1, caption = "Comparación AIC modelo completo vs seleccionado")
+```
+**Respuestas**
+
+a)
+```{r variables-seleccionadas-aic}
+vars_completo <- attr(terms(modelo_completo), "term.labels")
+vars_seleccionadas <- attr(terms(modelo_step), "term.labels")
+vars_eliminadas <- setdiff(vars_completo, vars_seleccionadas)
+
+tibble(variable_seleccionada = vars_seleccionadas) %>%
+  kable(caption = "Variables seleccionadas por stepAIC")
+```
+
+b) Sí, ya que se eliminaron 11 predictores poco relevantes.
+
+c) 
+```{r variables-eliminadas-aic}
+tibble(variable_eliminada = vars_eliminadas) %>%
+  kable(caption = "Variables eliminadas por stepAIC")
+```
+
+d) Las variables seleccionadas por AIC coinciden en buena medida con las identificadas en ítems previos, tales cómo "OverTime" y "JobSatisfaction", sin embargo también se incluyen otras no consideradas anteriormente ("NumCompaniesWorked", "EnvironmentSatisfaction").
+
+e) No necesariamente ya que el AIC se calcula sobre los mismos datos de entrenamiento usados para ajustar el modelo. Es posible que un modelo menos complejo y con menor AIC tenga un peor rendimiento.
+
+## 3.5 Ridge y lasso
+
+```{r matriz-predictores}
+formula_completa <- Attrition ~ Age + DailyRate + DistanceFromHome + Education +
+  EnvironmentSatisfaction + Gender + HourlyRate + JobInvolvement +
+  JobLevel + JobRole + JobSatisfaction + MaritalStatus +
+  MonthlyIncome + MonthlyRate + NumCompaniesWorked + OverTime +
+  PercentSalaryHike + PerformanceRating + RelationshipSatisfaction +
+  StockOptionLevel + TotalWorkingYears + TrainingTimesLastYear +
+  WorkLifeBalance + YearsAtCompany + YearsInCurrentRole +
+  YearsSinceLastPromotion + YearsWithCurrManager
+
+X_train <- model.matrix(formula_completa, data = train)[, -1]
+y_train <- train$Attrition
+
+X_test <- model.matrix(formula_completa, data = test)[, -1]
+y_test <- test$Attrition
+```
+
+```{r ridge-lasso}
+set.seed(123)
+
+modelo_ridge <- cv.glmnet(
+  x = X_train, y = y_train,
+  family = "binomial",
+  alpha = 0,
+  standardize = TRUE
+)
+
+modelo_lasso <- cv.glmnet(
+  x = X_train, y = y_train,
+  family = "binomial",
+  alpha = 1,
+  standardize = TRUE
+)
+
+tibble(
+  modelo = c("Ridge", "Lasso"),
+  lambda_min = c(modelo_ridge$lambda.min, modelo_lasso$lambda.min),
+  lambda_1se = c(modelo_ridge$lambda.1se, modelo_lasso$lambda.1se)
+) %>% kable(digits = 4, caption = "lambda.min vs lambda.1se")
+```
+
+
+
+```{r coef-lasso-variables}
+coef_lasso_1se <- coef(modelo_lasso, s = "lambda.1se")
+
+variables_lasso <- rownames(coef_lasso_1se)[as.numeric(coef_lasso_1se) != 0]
+variables_lasso <- variables_lasso[variables_lasso != "(Intercept)"]
+
+variables_lasso
+length(variables_lasso)
+```
+
+```{r heatmap-coeficientes}
+extraer_coeficientes <- function(modelo, metodo, lambda_tipo) {
+  coef(modelo, s = lambda_tipo) %>%
+    as.matrix() %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "variable") %>%
+    rename(coeficiente = 2) %>%
+    mutate(metodo = metodo, lambda = lambda_tipo)
+}
+
+coeficientes_penalizados <- bind_rows(
+  extraer_coeficientes(modelo_ridge, "Ridge", "lambda.min"),
+  extraer_coeficientes(modelo_ridge, "Ridge", "lambda.1se"),
+  extraer_coeficientes(modelo_lasso, "Lasso", "lambda.min"),
+  extraer_coeficientes(modelo_lasso, "Lasso", "lambda.1se")
+)
+
+coef_long_seleccion <- coeficientes_penalizados %>%
+  filter(variable != "(Intercept)") %>%
+  unite("modelo_lambda", metodo, lambda, sep = "_") %>%
+  mutate(seleccionada = ifelse(coeficiente == 0, "No seleccionada", "Seleccionada"))
+
+# Solo escogemos las 20 variables de mayor magnitud
+top_vars <- coef_long_seleccion %>%
+  group_by(variable) %>%
+  summarise(mag = mean(abs(coeficiente))) %>%
+  arrange(desc(mag)) %>%
+  slice_head(n = 20) %>%
+  pull(variable)
+
+coef_long_seleccion %>%
+  filter(variable %in% top_vars) %>%
+  ggplot(aes(x = modelo_lambda, y = variable, fill = seleccionada)) +
+  geom_tile(color = "white") +
+  labs(
+    title = "Variables seleccionadas por Ridge y Lasso",
+    subtitle = "Top 20 variables con mayor magnitud promedio de coeficiente",
+    x = "Modelo", y = "Variable", fill = "Estado"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r comparar-lasso-aic}
+variables_aic <- names(coef(modelo_step))[-1]
+
+tibble(metodo = "Lasso (lambda.1se)", n_variables = length(variables_lasso))
+tibble(metodo = "AIC (stepwise)", n_variables = length(variables_aic))
+```
+**Respuestas:**
+
+a) Sí, ya que Lasso panaliza a varios componentes y elimina a otros dejando sus coeficientes en cero.
+
+b) No. Ridge también penaliza las variables pero no las elimina. Esto puede verse en el heatmap ya que ninguna se coloca como "no seleccionada".
+
+c) Lasso, ya que este nos entrega un conjunto reducido y más sencillo de analizar.
+
+d) Cómo existen variables correlacionadas ("Age", "YearsAtCompany", "YearsInCurrentRole", etc) es recomendable utilizar Ridge ya que la penalización se reparte entre estas.
+
+## 3.6 Evaluación predictiva
+
+```{r funcion-metricas}
+calcular_metricas <- function(prob_pred, clase_real, punto_corte = 0.5, nombre_modelo) {
+  clase_pred <- factor(
+    ifelse(prob_pred > punto_corte, "Yes", "No"),
+    levels = levels(clase_real)
+  )
+
+  cm <- confusionMatrix(clase_pred, clase_real, positive = "Yes")
+  roc_obj <- roc(response = clase_real, predictor = prob_pred, levels = rev(levels(clase_real)))
+
+  tibble(
+    modelo = nombre_modelo,
+    accuracy = cm$overall["Accuracy"],
+    balanced_accuracy = cm$byClass["Balanced Accuracy"],
+    sensibilidad = cm$byClass["Sensitivity"],
+    especificidad = cm$byClass["Specificity"],
+    auc = as.numeric(auc(roc_obj))
+  )
+}
+```
+
+```{r prediccion-modelos}
+prob_interpretable <- predict(modelo_interpretable, newdata = test, type = "response")
+prob_step <- predict(modelo_step, newdata = test, type = "response")
+prob_ridge <- as.numeric(predict(modelo_ridge, newx = X_test, s = "lambda.min", type = "response"))
+prob_lasso <- as.numeric(predict(modelo_lasso, newx = X_test, s = "lambda.min", type = "response"))
+
+metricas_finales <- bind_rows(
+  calcular_metricas(prob_interpretable, test$Attrition, nombre_modelo = "Logístico interpretable"),
+  calcular_metricas(prob_step, test$Attrition, nombre_modelo = "Seleccionado por AIC"),
+  calcular_metricas(prob_ridge, test$Attrition, nombre_modelo = "Ridge"),
+  calcular_metricas(prob_lasso, test$Attrition, nombre_modelo = "Lasso")
+)
+
+metricas_finales %>% arrange(desc(auc)) %>% kable(digits = 3, caption = "Comparación de modelos en el conjunto de prueba")
+```
+
+```{r matrices-confusion}
+tabla_confusion <- function(prob_pred, clase_real, punto_corte = 0.5) {
+  clase_pred <- factor(ifelse(prob_pred > punto_corte, "Yes", "No"), levels = levels(clase_real))
+  table(Predicho = clase_pred, Real = clase_real)
+}
+
+tabla_confusion(prob_interpretable, test$Attrition) %>% kable(caption = "Matriz de confusión: logístico interpretable")
+tabla_confusion(prob_step, test$Attrition) %>% kable(caption = "Matriz de confusión: seleccionado por AIC")
+tabla_confusion(prob_ridge, test$Attrition) %>% kable(caption = "Matriz de confusión: Ridge")
+tabla_confusion(prob_lasso, test$Attrition) %>% kable(caption = "Matriz de confusión: Lasso")
+```
