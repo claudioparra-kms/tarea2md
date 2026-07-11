@@ -471,3 +471,264 @@ tabla_confusion(prob_step, test$Attrition) %>% kable(caption = "Matriz de confus
 tabla_confusion(prob_ridge, test$Attrition) %>% kable(caption = "Matriz de confusión: Ridge")
 tabla_confusion(prob_lasso, test$Attrition) %>% kable(caption = "Matriz de confusión: Lasso")
 ```
+
+
+**Respuestas:**
+
+a) El modelo con mayor AUC es el que utiliza Lasso.
+
+b) El modelo con variables seleccionadas por AIC.
+
+c) Porque la medida no distingue entre clases, de manera que si un modelo solo predice correctamente la clase mayoritaria del dataset entonces su accuracy será alto.
+
+d) El modelo AIC, ya que tiene un buen AUC y la sensibilidad más alta.
+Si el objetivo principal es **detectar** posibles casos de rotación, recomendaríamos el modelo
+   con mayor sensibilidad (y AUC, como medida agregada de discriminación), incluso si su accuracy
+   global es levemente menor, ya que el costo de no identificar a un empleado en riesgo de irse
+   suele ser mayor que el de una alerta falsa.
+
+e) Considerando la gran cantidad de variables y la correlación entre algunas de estas, escogería el modelo Ridge.
+
+## 3.7 PCA aplicado a variables laborales numéricas
+
+```{r seleccion-numericas-pca}
+attrition_num <- attrition %>%
+  select(all_of(vars_pca)) %>%
+  mutate(across(where(is.ordered), as.numeric))
+
+attrition_scaled <- scale(attrition_num)
+```
+
+```{r pca-attrition}
+pca_attrition <- prcomp(attrition_scaled, center = FALSE, scale. = FALSE)
+
+pca_var <- pca_attrition$sdev^2
+pca_var_exp <- pca_var / sum(pca_var)
+pca_var_cum <- cumsum(pca_var_exp)
+
+n80 <- which(pca_var_cum >= 0.80)[1]
+n80
+
+tibble(
+  PC = paste0("PC", seq_along(pca_var_exp)),
+  varianza_explicada = pca_var_exp,
+  varianza_acumulada = pca_var_cum
+) %>% head(10) %>% kable(digits = 4, caption = "Varianza explicada (primeros 10 componentes)")
+```
+
+```{r scree-attrition}
+scree_df <- tibble(
+  n_componentes = seq_along(pca_var_exp),
+  varianza_explicada = pca_var_exp,
+  varianza_acumulada = pca_var_cum
+)
+
+p1 <- scree_df %>%
+  filter(n_componentes <= 15) %>%
+  ggplot(aes(x = factor(n_componentes), y = varianza_explicada)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Scree plot", x = "Componente", y = "Varianza explicada")
+
+p2 <- ggplot(scree_df, aes(x = n_componentes, y = varianza_acumulada)) +
+  geom_line() +
+  geom_point() +
+  geom_hline(yintercept = 0.80, linetype = "dashed", color = "darkred") +
+  geom_vline(xintercept = n80, linetype = "dashed", color = "darkred") +
+  labs(title = "Varianza acumulada", x = "Número de componentes", y = "Varianza acumulada")
+
+p1 / p2
+```
+
+```{r pc1-pc2-attrition}
+pca_scores <- as_tibble(pca_attrition$x) %>%
+  bind_cols(attrition %>% select(Attrition))
+
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = Attrition)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  labs(
+    title = "PC1 vs PC2 coloreado por Attrition",
+    x = paste0("PC1 (", round(pca_var_exp[1] * 100, 1), "%)"),
+    y = paste0("PC2 (", round(pca_var_exp[2] * 100, 1), "%)")
+  )
+```
+
+```{r contribuciones}
+fviz_contrib(pca_attrition, choice = "var", axes = 1, top = 10) +
+  labs(title = "Contribución de variables a PC1")
+
+fviz_contrib(pca_attrition, choice = "var", axes = 2, top = 10) +
+  labs(title = "Contribución de variables a PC2")
+```
+
+**Respuestas:**
+
+a) Alrededor del 20%.
+
+b) Aproximadamente 8%.
+
+c) Se requieren 13 componentes para explicar el 80% de la varianza, lo cual es mucho mayor en comparación del problema 2. Esto puede ser una indicación de las variables numéricas de este dataset son mas heterogéneas.
+
+d) Variables temporales relacionadas a la trayectoria laboral del trabajador ("TotalWorkingYears", "YearsAtCompany").
+
+e) También se incluyen variables temporales, sin embargo el enfoque es en el rendimiento del empleado ("PerformanceRating", "NumCompaniesWorked").
+
+f) PC1 puede interpretarse como madurez y trayectoria profesional, mientras que PC2 se asocia más al desemepeño laboral y su respectiva compensación económica.
+
+## 3.8 Modelo usando componentes principales
+
+
+```{r pca-train-test}
+train_num <- train %>% select(all_of(vars_pca)) %>% mutate(across(where(is.ordered), as.numeric))
+test_num  <- test  %>% select(all_of(vars_pca)) %>% mutate(across(where(is.ordered), as.numeric))
+
+pca_train <- prcomp(train_num, center = TRUE, scale. = TRUE)
+
+pca_var_exp_train <- pca_train$sdev^2 / sum(pca_train$sdev^2)
+n80_train <- which(cumsum(pca_var_exp_train) >= 0.80)[1]
+
+scores_train <- as_tibble(pca_train$x[, 1:n80_train]) %>% mutate(Attrition = train$Attrition)
+scores_test  <- as_tibble(predict(pca_train, newdata = test_num)[, 1:n80_train]) %>% mutate(Attrition = test$Attrition)
+```
+
+```{r modelo-pca}
+modelo_pca <- glm(Attrition ~ ., data = scores_train, family = binomial)
+summary(modelo_pca)
+
+prob_pca <- predict(modelo_pca, newdata = scores_test, type = "response")
+
+metricas_finales <- bind_rows(
+  metricas_finales,
+  calcular_metricas(prob_pca, test$Attrition, nombre_modelo = "Logístico sobre PCs")
+)
+
+metricas_finales %>% arrange(desc(auc)) %>% kable(digits = 3, caption = "Comparación final incluyendo modelo sobre componentes principales")
+```
+
+**Respuestas:**
+
+a) Empeora. El modelo PCA posee el AUC y la sensibilidad más baja. Se necesitan de muchos componentes para mantener una cantidad ideal de varianza, y aún así este tiene el peor rendimiento para separar la variable respuesta.
+
+b) Se reduce la dimensionalidad, lo cual es útil a la hora de visualizar patrones o si el dataset tuviera más variables. Sin embargo, en este caso donde predicción es el enfoque no se tiene un buen desempeño.
+
+c) Se pierde la interpretación directa, ya que envés de utilizar relacionar variables con el objetivo de predicción ("horas extra aumenta la probabilidad de dejar la empressa") ahora se deben utilizar combinaciones lineales que deben relacionarse con las variables utilizadas para luego interpretar cada componente por separado.
+
+d) No. El desempeño predictivo empeora considerablemente respecto a otros métodos. En este caso PCA sólo se debería ocupar como una herramienta exploratoria.
+   
+## 3.9 Clustering de perfiles laborales
+
+```{r kmeans-attrition}
+set.seed(123)
+
+resultados_k <- map_dfr(2:6, function(k) {
+  km <- kmeans(attrition_scaled, centers = k, nstart = 25)
+  sil <- silhouette(km$cluster, dist(attrition_scaled))
+  tibble(k = k, tot_withinss = km$tot.withinss, avg_silhouette = mean(sil[, "sil_width"]))
+})
+
+resultados_k %>% kable(digits = 3, caption = "Comparación de k = 2 a 6")
+
+p_codo <- ggplot(resultados_k, aes(x = k, y = tot_withinss)) +
+  geom_line() + geom_point() +
+  labs(title = "Método del codo", x = "k", y = "Suma de cuadrados intra-cluster")
+
+p_sil <- ggplot(resultados_k, aes(x = k, y = avg_silhouette)) +
+  geom_line() + geom_point() +
+  labs(title = "Silhouette promedio", x = "k", y = "Silhouette")
+
+p_codo + p_sil
+```
+
+**a) Utilizaremos cuatro clústers.
+
+```{r kmeans-final-attrition}
+set.seed(123)
+km_final <- kmeans(attrition_scaled, centers = 4, nstart = 25)
+
+attrition_clustered <- attrition %>%
+  mutate(cluster_kmeans = factor(km_final$cluster)) %>%
+  bind_cols(pca_scores %>% select(PC1, PC2))
+```
+
+```{r plot-clusters-attrition}
+ggplot(attrition_clustered, aes(x = PC1, y = PC2, color = cluster_kmeans)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  labs(title = "Clusters de k-means (k = 4) en el espacio PC1-PC2", color = "Cluster")
+```
+
+```{r hclust-attrition}
+dist_attr <- dist(attrition_scaled)
+hc_complete <- hclust(dist_attr, method = "complete")
+hc_ward <- hclust(dist_attr, method = "ward.D2")
+
+clusters_complete <- cutree(hc_complete, k = 4)
+clusters_ward <- cutree(hc_ward, k = 4)
+
+attrition_clustered <- attrition_clustered %>%
+  mutate(
+    cluster_hc_complete = factor(clusters_complete),
+    cluster_hc_ward = factor(clusters_ward)
+  )
+```
+
+```{r dendrogramas-attrition}
+plot(hc_complete, labels = FALSE, hang = -1,
+     main = "Dendrograma - Complete linkage", xlab = "", sub = "")
+rect.hclust(hc_complete, k = 4, border = "steelblue")
+
+plot(hc_ward, labels = FALSE, hang = -1,
+     main = "Dendrograma - Ward.D2", xlab = "", sub = "")
+rect.hclust(hc_ward, k = 4, border = "darkorange")
+```
+
+```{r cruce-cluster-attrition}
+table(Cluster = attrition_clustered$cluster_kmeans, Attrition = attrition_clustered$Attrition) %>%
+  kable(caption = "k-means vs Attrition")
+
+table(Cluster = attrition_clustered$cluster_hc_ward, Attrition = attrition_clustered$Attrition) %>%
+  kable(caption = "HC Ward vs Attrition")
+```
+
+```{r caracterizar-clusters}
+attrition_clustered %>%
+  group_by(cluster_kmeans) %>%
+  summarise(
+    n = n(),
+    prop_attrition = mean(Attrition == "Yes"),
+    edad_media = mean(Age),
+    ingreso_medio = mean(MonthlyIncome),
+    antiguedad_media = mean(YearsAtCompany),
+    satisfaccion_media = mean(as.numeric(JobSatisfaction)),
+    prop_overtime = mean(OverTime == "Yes")
+  ) %>%
+  kable(digits = 2, caption = "Caracterización de perfiles (k-means, k = 4)")
+```
+
+**Respuestas:**
+
+f)  Cluster 1: Trabajadores de edad media con bajos ingresos. A pesar de llevar tiempo en la empresa y trabajar horas extra no parecen tener mejores condiciones. Probabilidad de rotacion alta.
+
+    Clusuter 2: Trabajadores con más experiencia e ingresos (senior). Llevan más tiempo en la empresa y por lo tanto su probabilidad de renunciar es menor.
+    
+    Cluster 3: Simnilar al cluster 1, pero con menores ingresos y años trabajados. Pueden nuevos empleados que se están ajustando al ritmo de la compañia y son más propensos a renunciar.
+    
+    Cluster 4: Similiar al cluster 2, pero con menores ingresos y años trabajados. Podrían ser empleados en proceso de convertirse en seniors, por lo que su probabilidad de rotación es reducida.
+
+g) Si, en este caso son los clústers 1 y 3. Ambos tienen los menores ingresos, edad y tiempo en la empresa.
+
+h) Con estos datos es posible crear un perfil de riesgo de trabajadores propensos a dejar la empresa, y de esta manera aplicar medidas para retenerlos, tales cómo limitar las horas extra, mejorar las condiciones de trabajo o reconocer sus méritos mediante ascensos.
+
+## 3.10 Discusión final del problema
+
+a) Las variables más importantes son: "OverTime", "MonthlyIncome", "JobSatisfaction", "YearsAtCompany" y "WorkLifeBalance".
+
+b) El modelo AIC, ya que es menos propenso a falsos positivos o verdaderos negativos.
+
+c) El modelo logístico ya que utiliza las variables originales.
+
+d) PCA permitió resumir variables y de estar forma iden identificar ciertas áreas del dataset (trayectoria laboral vs. desempeño y compensación), junto con ayudar en la visualización de clustering.
+
+e) Al agrupar observaciones pudimos identificar perfiles de bajo riesgo (empleados senior) y alto riesgo (empleados junior) en cuanto a rotación, lo cual en el contexto de la empresa será útil para ingresar y mantener talento nuevo al abordar directamente sus necesidades.
+
+f) Mediante estos resultados es posible identificar las principales variables que contribuyen a la rotación de empleados, sin embargo no se tienen datos para crear soluciones efectivas para reducir las renuncias. Por ejemplo, no se sabe si el problema del "Overtime" es que no está bien remunerada, o que los horarios no coinciden con la vida personal de los trabajadores, o si estos desean laborar por más horas de las que les dan. El área de Recursos Humanos depende de las experiencias de cada empleado, y no es posible llegar a dichas conclusiones mediante este dataset.
+
+g) Un modelo de predicción no debe utilizarse para realizar decisiones sobre personas. Los datos que este utilice deben ser informados con total transparencia, y que entregue siempre debe pasar por supervisión humana. El objetivo de un modelo cómo este no es identificar riesgos para realizar despisos preventivos, sino crear políticas de retención para mejorar las condiciones dentro de la empresa.
